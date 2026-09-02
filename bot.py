@@ -17,7 +17,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- KEEPALIVE SERVER (For Railway) ---
+# --- KEEPALIVE SERVER (for Railway) ---
 app = Flask('')
 @app.route('/')
 def home():
@@ -27,11 +27,10 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- TOKENS FROM ENVIRONMENT VARIABLES (Not in code!) ---
+# --- TOKENS FROM ENVIRONMENT ---
 TOKENS = os.environ.get("TOKENS", "").split(",")
 TOKENS = [t.strip() for t in TOKENS if t.strip() and "TOKEN" not in t]
 
-# If no tokens in env, try to load from tokens.json (fallback)
 if not TOKENS:
     try:
         with open("tokens.json", "r") as f:
@@ -48,7 +47,7 @@ if not TOKENS:
 SUDO_USERS = [1442911002130907146]  # Your user ID
 PREFIX = "!"
 
-# --- TOKEN PERSISTENCE ---
+# --- PERSISTENCE FILES ---
 TOKENS_FILE = "tokens.json"
 PROFILES_FILE = "profiles.json"
 
@@ -251,11 +250,11 @@ TMKCSWIPE_LINES = [
 ]
 
 # --- GLOBALS ---
-swipe_data = {}
-lock_data = {}
-clock_data = {}
+swipe_loops = {}  # {user_id: {'task': asyncio.Task, 'lines': list, 'message_id': int}}
+lock_data = {}    # user_id -> True
+clock_data = {}   # user_id -> custom_message
 
-original_profile = {}
+original_profile = {}   # will store name, avatar_url, bio
 saved_profiles = {}
 current_profile_name = None
 
@@ -363,79 +362,54 @@ class RexMasterBot(discord.Client):
         self.heart_index = {}
         self.bypass_mode = True
         self.pending_tasks = {}
+        self.swipe_tasks = {}  # user_id -> asyncio.Task
 
-    async def run_attack(self, cid, cmd, args):
-        is_nc = cmd in ["nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]
-        loop_type = "nc" if is_nc else "spam"
-
-        if cid in self.active_loops and self.active_loops[cid].get(loop_type, False):
+    async def run_swipe_loop(self, target_user_id, message_id, channel_id, lines, swipe_type):
+        """Continuously reply to the same message with lines from the list."""
+        index = 0
+        channel = self.get_channel(channel_id)
+        if not channel:
+            return
+        
+        try:
+            target_msg = await channel.fetch_message(message_id)
+        except:
             return
 
-        if cid not in self.active_loops:
-            self.active_loops[cid] = {"spam": False, "nc": False}
-            self.heart_index[cid] = 0
-        self.active_loops[cid][loop_type] = True
+        while True:
+            # Check if this swipe should stop
+            if target_user_id not in swipe_loops:
+                break
+            if swipe_loops[target_user_id].get('stopped', False):
+                break
 
-        self.pending_tasks[cid] = (cmd, args)
-
-        channel = self.get_channel(cid)
-        if not channel: return
-
-        burst_count = 0
-        if self.bypass_mode and is_nc:
-            burst_size = random.randint(12, 15)
-            burst_pause = random.randint(3, 5)
-        else:
-            burst_size = 999999
-            burst_pause = 0
-
-        while self.active_loops.get(cid, {}).get(loop_type, False):
             try:
-                if self.bypass_mode and is_nc:
-                    burst_count += 1
-                    if burst_count >= burst_size:
-                        await asyncio.sleep(burst_pause)
-                        burst_count = 0
-                        burst_size = random.randint(12, 15)
-                        burst_pause = random.randint(3, 5)
+                # Get next line
+                if index >= len(lines):
+                    index = 0
+                reply_text = lines[index]
+                index += 1
 
-                if cmd == "espam": line = f"{args} {random.choice(ENG_LIST)}"
-                elif cmd == "rexspam": line = f"{args} {random.choice(REX_SPAM_LIST)}"
-                elif cmd == "cspam": line = args
-                elif cmd in ["spam", "chudai"]: line = f"{args} {random.choice(REX_LIST)}"
-                elif cmd in ["rexswipe", "eswipe", "cswipe", "target", "targetslide"]:
-                    if cmd == "eswipe": line = f"{args} {random.choice(ENG_LIST)}"
-                    elif cmd == "cswipe": line = args
-                    else: line = f"{args} {random.choice(REX_SWIPE_LIST if cmd=='rexswipe' else REX_LIST)}"
-                    async for m in channel.history(limit=1): await m.reply(line, mention_author=False)
-                    await asyncio.sleep(self.msg_delay); continue
-                elif is_nc:
-                    if cmd == "ncc": new_name = f"{random.choice(EMO_LIST_2)} {args} {random.choice(EMO_LIST_1)}"
-                    elif cmd == "enc": new_name = f"{args} {random.choice(ENG_LIST)}"[:100]
-                    elif cmd == "longnc": new_name = f"{args} {random.choice(LONGNC_PATTERNS)}"
-                    elif cmd == "baapnc": new_name = f"{args} {random.choice(LONGNC_PATTERNS)} 𝙏𝙀𝙍𝘼 𝘽𝘼𝘼𝙋 𝙍𝙀𝙓"
-                    elif cmd == "spmnc":
-                        heart = HEART_CYCLE[self.heart_index[cid] % len(HEART_CYCLE)]
-                        self.heart_index[cid] += 1
-                        new_name = f"{args} {SPAMNC_PATTERN} {heart}"
-                    elif cmd == "timenc":
-                        now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
-                        time_str = now.strftime("%H:%M:%S")
-                        clock_emoji = get_clock_emoji(now.hour, now.minute)
-                        new_name = f"{args} 𝐃ᴇ𝐊ʜ 𝐓ᴇʀɪ 𝐌ᴀ 𝐊ɪ 𝐂ᴜᴅᴀɪ 𝐊ᴀ 𝐓ɪᴍᴇ 𝐇ᴏɢʏᴀ {time_str} {clock_emoji}"
-                    else: new_name = random.choice(NAME_LIST).format(name=args)
-                    await channel.edit(name=new_name[:100])
-                    await asyncio.sleep(self.nc_delay); continue
-                await channel.send(line)
+                # Reply to the message
+                sent = await target_msg.reply(reply_text, mention_author=False)
+                await sent.add_reaction("🤣")
+
+                # Wait before next reply
                 await asyncio.sleep(self.msg_delay)
-            except:
-                await asyncio.sleep(2)
 
-        self.pending_tasks.pop(cid, None)
+            except discord.errors.NotFound:
+                # Message was deleted - stop the loop
+                break
+            except Exception as e:
+                logger.error(f"Swipe loop error: {e}")
+                await asyncio.sleep(1)
+
+        # Clean up
+        swipe_loops.pop(target_user_id, None)
 
     async def on_message(self, message):
         global SELF_REACT_EMOJI, global_react_target
-        global swipe_data, lock_data, clock_data, original_profile, saved_profiles, current_profile_name
+        global swipe_loops, lock_data, clock_data, original_profile, saved_profiles, current_profile_name
 
         is_sudo = message.author.id in SUDO_USERS
         is_self = message.author.id == self.user.id
@@ -503,6 +477,9 @@ class RexMasterBot(discord.Client):
                 copycat_mode.discard(cid)
                 global_react_target = None
                 self.pending_tasks.pop(cid, None)
+                # Stop all swipe loops
+                for uid in list(swipe_loops.keys()):
+                    swipe_loops[uid]['stopped'] = True
                 await message.channel.send("🛑 **ALL LOOPS & FEATURES KILLED**")
                 return
 
@@ -537,6 +514,7 @@ class RexMasterBot(discord.Client):
                     f"• Latency: `{latency_ms}ms`\n"
                     f"• Active NC loops: `{active_nc} channels`\n"
                     f"• Active spam loops: `{active_spam} channels`\n"
+                    f"• Active swipes: `{len(swipe_loops)}`\n"
                     f"• Memory usage: `{memory} MB`\n"
                     f"• Servers: `{guilds}`"
                 )
@@ -814,8 +792,7 @@ class RexMasterBot(discord.Client):
                 asyncio.create_task(self.run_attack(cid, cmd, args))
                 return
 
-            # ========== NEW FEATURES ==========
-
+            # ========== SWIPE COMMANDS ==========
             elif cmd in ["longswipe", "teriswipe", "tmkcswipe"]:
                 if not message.reference:
                     await message.channel.send("❌ You need to reply to a user's message to use this command.")
@@ -823,11 +800,46 @@ class RexMasterBot(discord.Client):
                 try:
                     ref_msg = await message.channel.fetch_message(message.reference.message_id)
                     target = ref_msg.author
+                    target_msg = ref_msg
                 except:
                     await message.channel.send("❌ Could not fetch the replied message.")
                     return
-                swipe_data[target.id] = {'type': cmd, 'index': 0}
-                await message.channel.send(f"✅ **{cmd.upper()}** activated for {target.display_name}.")
+
+                # Stop any existing swipe for this user
+                if target.id in swipe_loops:
+                    swipe_loops[target.id]['stopped'] = True
+                    await asyncio.sleep(0.5)
+
+                # Select the correct list
+                if cmd == "longswipe":
+                    lines = LONGSWIPE_LINES
+                elif cmd == "teriswipe":
+                    lines = TERISWIPE_LINES
+                else:
+                    lines = TMKCSWIPE_LINES
+
+                # Store the swipe info
+                swipe_loops[target.id] = {
+                    'stopped': False,
+                    'lines': lines,
+                    'message_id': target_msg.id,
+                    'channel_id': target_msg.channel.id
+                }
+
+                # Start the swipe loop
+                task = asyncio.create_task(
+                    self.run_swipe_loop(
+                        target.id,
+                        target_msg.id,
+                        target_msg.channel.id,
+                        lines,
+                        cmd
+                    )
+                )
+                self.swipe_tasks[target.id] = task
+
+                await message.channel.send(f"✅ **{cmd.upper()}** activated for {target.display_name}. Will reply to that message continuously until !stopswipe.")
+
                 return
 
             elif cmd == "stopswipe":
@@ -840,20 +852,27 @@ class RexMasterBot(discord.Client):
                 except:
                     await message.channel.send("❌ Could not fetch the replied message.")
                     return
-                if target.id in swipe_data:
-                    del swipe_data[target.id]
+
+                if target.id in swipe_loops:
+                    swipe_loops[target.id]['stopped'] = True
+                    # Clean up task reference
+                    self.swipe_tasks.pop(target.id, None)
                     await message.channel.send(f"✅ Stopped swipe for {target.display_name}.")
                 else:
                     await message.channel.send(f"❌ No active swipe for {target.display_name}.")
                 return
 
+            # ========== LOCK COMMANDS ==========
             elif cmd == "lock":
                 if not message.mentions:
                     await message.channel.send("❌ Mention the user to lock: `!lock @user`")
                     return
                 target = message.mentions[0]
                 lock_data[target.id] = True
-                swipe_data.pop(target.id, None)
+                # Remove any swipe for this user
+                if target.id in swipe_loops:
+                    swipe_loops[target.id]['stopped'] = True
+                    self.swipe_tasks.pop(target.id, None)
                 await message.channel.send(f"🔒 **{target.display_name}** locked (will reply with REX lines).")
                 return
 
@@ -869,6 +888,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send(f"❌ {target.display_name} is not locked.")
                 return
 
+            # ========== CLOCK COMMANDS ==========
             elif cmd == "clock":
                 if not message.reference:
                     await message.channel.send("❌ You need to reply to a user's message to set a clock.")
@@ -881,7 +901,10 @@ class RexMasterBot(discord.Client):
                     return
                 if args.strip():
                     clock_data[target.id] = args.strip()
-                    swipe_data.pop(target.id, None)
+                    # Remove any swipe for this user
+                    if target.id in swipe_loops:
+                        swipe_loops[target.id]['stopped'] = True
+                        self.swipe_tasks.pop(target.id, None)
                     lock_data.pop(target.id, None)
                     await message.channel.send(f"⏰ Clock set for {target.display_name}: `{args.strip()}`")
                 else:
@@ -909,6 +932,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send(f"❌ No clock active for {target.display_name}.")
                 return
 
+            # ========== PROFILE CLONING ==========
             elif cmd == "clone":
                 if not message.reference:
                     await message.channel.send("❌ Reply to the user whose profile you want to clone.")
@@ -919,8 +943,15 @@ class RexMasterBot(discord.Client):
                 except:
                     await message.channel.send("❌ Could not fetch the replied message.")
                     return
-                new_name = target.display_name
+
+                # Get target's DISPLAY NAME (not username)
+                new_display_name = target.display_name
+                # Get target's avatar URL
                 avatar_url = target.display_avatar.url
+                # Try to get bio (about me) - might not work for self-bots
+                bio = getattr(target, "bio", "")
+
+                # Download avatar
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(avatar_url) as resp:
@@ -929,42 +960,61 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Failed to download avatar.")
                     return
 
+                # Apply changes to the bot's own profile
+                # Change global display name (username) - this changes the actual username
+                try:
+                    await self.user.edit(username=new_display_name)
+                except Exception as e:
+                    logger.warning(f"Could not change username: {e}")
+
+                # Change nickname in the current guild (if in a guild)
                 if message.guild:
                     try:
-                        await message.guild.me.edit(nick=new_name)
-                    except:
-                        pass
+                        await message.guild.me.edit(nick=new_display_name)
+                    except Exception as e:
+                        logger.warning(f"Could not change nickname: {e}")
 
+                # Change avatar
                 try:
                     await self.user.edit(avatar=avatar_bytes)
                 except Exception as e:
                     await message.channel.send(f"❌ Failed to change avatar: {e}")
                     return
 
+                # Store original profile if not already stored
                 if not original_profile:
-                    orig_name = message.guild.me.display_name if message.guild else self.user.display_name
+                    orig_name = self.user.display_name
                     orig_avatar = self.user.display_avatar.url
+                    orig_bio = getattr(self.user, "bio", "")
                     original_profile = {
                         "name": orig_name,
                         "avatar_url": orig_avatar,
-                        "bio": ""
+                        "bio": orig_bio
                     }
                     profiles = load_profiles()
                     profiles["original"] = original_profile
                     save_profiles(profiles)
 
-                await message.channel.send(f"✅ Cloned profile of **{target.display_name}**.")
+                await message.channel.send(f"✅ Cloned profile of **{target.display_name}** (display name, avatar, bio).")
                 return
 
             elif cmd == "normal":
                 if not original_profile:
                     await message.channel.send("❌ No original profile saved. Use `!clone` first to store it.")
                     return
+
+                # Restore original name, avatar, bio
+                try:
+                    await self.user.edit(username=original_profile["name"])
+                except Exception as e:
+                    logger.warning(f"Could not restore username: {e}")
+
                 if message.guild:
                     try:
                         await message.guild.me.edit(nick=original_profile["name"])
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Could not restore nickname: {e}")
+
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(original_profile["avatar_url"]) as resp:
@@ -973,8 +1023,9 @@ class RexMasterBot(discord.Client):
                 except Exception as e:
                     await message.channel.send(f"❌ Failed to restore avatar: {e}")
                     return
+
                 current_profile_name = None
-                await message.channel.send("✅ Restored original profile.")
+                await message.channel.send("✅ Restored original profile (display name, avatar).")
                 return
 
             elif cmd == "saveprf":
@@ -986,13 +1037,14 @@ class RexMasterBot(discord.Client):
                     return
                 current_name = message.guild.me.display_name
                 current_avatar_url = self.user.display_avatar.url
+                current_bio = getattr(self.user, "bio", "")
                 profiles = load_profiles()
                 if "saved" not in profiles:
                     profiles["saved"] = {}
                 profiles["saved"][args] = {
                     "name": current_name,
                     "avatar_url": current_avatar_url,
-                    "bio": ""
+                    "bio": current_bio
                 }
                 save_profiles(profiles)
                 await message.channel.send(f"✅ Profile saved as **{args}**.")
@@ -1018,11 +1070,15 @@ class RexMasterBot(discord.Client):
                     await message.channel.send(f"❌ Profile `{args}` not found.")
                     return
                 prof = saved[args]
+                try:
+                    await self.user.edit(username=prof["name"])
+                except Exception as e:
+                    logger.warning(f"Could not change username: {e}")
                 if message.guild:
                     try:
                         await message.guild.me.edit(nick=prof["name"])
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Could not change nickname: {e}")
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(prof["avatar_url"]) as resp:
@@ -1038,11 +1094,13 @@ class RexMasterBot(discord.Client):
             else:
                 await message.channel.send(f"❌ Unknown command: `{cmd}`. Use `!help` for available commands.")
 
-        # --- AUTO-REPLY SYSTEMS ---
+        # --- AUTO-REPLY SYSTEMS (Clock > Lock > Swipe) ---
         if is_self:
             return
 
         author = message.author
+        
+        # Clock - highest priority
         if author.id in clock_data:
             try:
                 await message.reply(clock_data[author.id], mention_author=False)
@@ -1050,6 +1108,7 @@ class RexMasterBot(discord.Client):
                 pass
             return
 
+        # Lock - second priority
         if author.id in lock_data:
             try:
                 reply_text = random.choice(REX_LIST)
@@ -1058,28 +1117,81 @@ class RexMasterBot(discord.Client):
                 pass
             return
 
-        if author.id in swipe_data:
-            sw = swipe_data[author.id]
-            swipe_type = sw['type']
-            idx = sw['index']
-            if swipe_type == 'longswipe':
-                lines = LONGSWIPE_LINES
-            elif swipe_type == 'teriswipe':
-                lines = TERISWIPE_LINES
-            elif swipe_type == 'tmkcswipe':
-                lines = TMKCSWIPE_LINES
-            else:
-                return
-            if idx >= len(lines):
-                idx = 0
-            reply_text = lines[idx]
-            swipe_data[author.id]['index'] = (idx + 1) % len(lines)
-            try:
-                sent = await message.reply(reply_text, mention_author=False)
-                await sent.add_reaction("🤣")
-            except:
-                pass
+        # Swipe - third priority (only if not locked or clocked)
+        if author.id in swipe_loops and not swipe_loops[author.id].get('stopped', False):
+            # Swipe is handled by the dedicated loop on the specific message
+            # We don't need to do anything here - the loop handles it.
+            pass
+
+    async def run_attack(self, cid, cmd, args):
+        # Same as original - keep all attack functionality
+        is_nc = cmd in ["nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]
+        loop_type = "nc" if is_nc else "spam"
+
+        if cid in self.active_loops and self.active_loops[cid].get(loop_type, False):
             return
+
+        if cid not in self.active_loops:
+            self.active_loops[cid] = {"spam": False, "nc": False}
+            self.heart_index[cid] = 0
+        self.active_loops[cid][loop_type] = True
+
+        self.pending_tasks[cid] = (cmd, args)
+
+        channel = self.get_channel(cid)
+        if not channel: return
+
+        burst_count = 0
+        if self.bypass_mode and is_nc:
+            burst_size = random.randint(12, 15)
+            burst_pause = random.randint(3, 5)
+        else:
+            burst_size = 999999
+            burst_pause = 0
+
+        while self.active_loops.get(cid, {}).get(loop_type, False):
+            try:
+                if self.bypass_mode and is_nc:
+                    burst_count += 1
+                    if burst_count >= burst_size:
+                        await asyncio.sleep(burst_pause)
+                        burst_count = 0
+                        burst_size = random.randint(12, 15)
+                        burst_pause = random.randint(3, 5)
+
+                if cmd == "espam": line = f"{args} {random.choice(ENG_LIST)}"
+                elif cmd == "rexspam": line = f"{args} {random.choice(REX_SPAM_LIST)}"
+                elif cmd == "cspam": line = args
+                elif cmd in ["spam", "chudai"]: line = f"{args} {random.choice(REX_LIST)}"
+                elif cmd in ["rexswipe", "eswipe", "cswipe", "target", "targetslide"]:
+                    if cmd == "eswipe": line = f"{args} {random.choice(ENG_LIST)}"
+                    elif cmd == "cswipe": line = args
+                    else: line = f"{args} {random.choice(REX_SWIPE_LIST if cmd=='rexswipe' else REX_LIST)}"
+                    async for m in channel.history(limit=1): await m.reply(line, mention_author=False)
+                    await asyncio.sleep(self.msg_delay); continue
+                elif is_nc:
+                    if cmd == "ncc": new_name = f"{random.choice(EMO_LIST_2)} {args} {random.choice(EMO_LIST_1)}"
+                    elif cmd == "enc": new_name = f"{args} {random.choice(ENG_LIST)}"[:100]
+                    elif cmd == "longnc": new_name = f"{args} {random.choice(LONGNC_PATTERNS)}"
+                    elif cmd == "baapnc": new_name = f"{args} {random.choice(LONGNC_PATTERNS)} 𝙏𝙀𝙍𝘼 𝘽𝘼𝘼𝙋 𝙍𝙀𝙓"
+                    elif cmd == "spmnc":
+                        heart = HEART_CYCLE[self.heart_index[cid] % len(HEART_CYCLE)]
+                        self.heart_index[cid] += 1
+                        new_name = f"{args} {SPAMNC_PATTERN} {heart}"
+                    elif cmd == "timenc":
+                        now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+                        time_str = now.strftime("%H:%M:%S")
+                        clock_emoji = get_clock_emoji(now.hour, now.minute)
+                        new_name = f"{args} 𝐃ᴇ𝐊ʜ 𝐓ᴇʀɪ 𝐌ᴀ 𝐊ɪ 𝐂ᴜᴅᴀɪ 𝐊ᴀ 𝐓ɪᴍᴇ 𝐇ᴏɢʏᴀ {time_str} {clock_emoji}"
+                    else: new_name = random.choice(NAME_LIST).format(name=args)
+                    await channel.edit(name=new_name[:100])
+                    await asyncio.sleep(self.nc_delay); continue
+                await channel.send(line)
+                await asyncio.sleep(self.msg_delay)
+            except:
+                await asyncio.sleep(2)
+
+        self.pending_tasks.pop(cid, None)
 
     async def on_connect(self):
         global start_time
@@ -1120,7 +1232,6 @@ def start_bot(token):
 if __name__ == "__main__":
     Thread(target=run_web, daemon=True).start()
 
-    # Try to load tokens from environment first, then file
     if not TOKENS:
         try:
             with open("tokens.json", "r") as f:
