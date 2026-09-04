@@ -251,7 +251,7 @@ TMKCSWIPE_LINES = [
 
 # --- GLOBALS FOR NEW SYSTEMS ---
 swipe_loops = {}  # user_id -> {'stopped': False, 'lines': list, 'message_id': int, 'channel_id': int}
-lock_data = {}    # user_id -> True
+lock_data = {}    # user_id -> True (global lock)
 clock_data = {}   # user_id -> custom_message
 
 original_profile = {}
@@ -260,14 +260,14 @@ current_profile_name = None
 
 # --- ORIGINAL BOT MANAGEMENT GLOBALS ---
 SELF_REACT_EMOJI = None
-lock_targets = {}
-lock_messages = {}
+lock_targets = {}          # channel_id -> user_id
+lock_messages = {}         # channel_id -> custom message
 react_targets = {}
 active_bots = {}
 locked_pfp = {}
 start_time = None
 global_react_target = None  # (user_id, emoji)
-copycat_mode = set()
+copycat_mode = set()        # channel IDs where echo is enabled
 purge_from_ids = {}
 
 # --- REX LISTS (unchanged) ---
@@ -400,7 +400,7 @@ class RexMasterBot(discord.Client):
 
         swipe_loops.pop(target_user_id, None)
 
-    # --- ATTACK LOOP (ORIGINAL) ---
+    # --- ATTACK LOOP (NC / SPAM) ---
     async def run_attack(self, cid, cmd, args):
         is_nc = cmd in ["nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]
         loop_type = "nc" if is_nc else "spam"
@@ -488,7 +488,7 @@ class RexMasterBot(discord.Client):
             args = " ".join(parts[1:]) if len(parts) > 1 else ""
             cid = message.channel.id
 
-            # ---------- HELP MENU ----------
+            # ---------- HELP MENU (FULL) ----------
             if cmd in ["help", "menu"]:
                 menu_text = (
                     "```yaml\n"
@@ -509,13 +509,16 @@ class RexMasterBot(discord.Client):
                     "**▸ SWIPE SYSTEMS**\n"
                     "`!longswipe` (reply) `!teriswipe` (reply) `!tmkcswipe` (reply) `!stopswipe` (reply)\n\n"
                     "**▸ LOCK & CLOCK**\n"
-                    "`!lock @user` (new) `!unlock @user`\n"
+                    "`!lock @user` `!unlock @user`\n"
                     "`!clock <msg>` (reply) `!stopclock` (reply)\n\n"
                     "**▸ PROFILE CLONING**\n"
                     "`!clone` (reply) `!normal` `!saveprf <name>` `!loadprf <name>` `!listsaveprf`\n\n"
-                    "**▸ REACT**\n"
-                    "`!react :emoji: @user` `!dreact` `!minereact` `!dminereact`\n\n"
+                    "**▸ TARGET MODULES**\n"
+                    "`!target` `!targetslide`\n\n"
+                    "**▸ SUDO CONTROL**\n"
+                    "`!addsudo` `!delsudo`\n\n"
                     "**▸ BOT MANAGEMENT**\n"
+                    "`!minereact` `!dminereact` `!react` `!dreact`\n"
                     "`!tts` (echo) `!dtts` `!activebots` `!leave`\n"
                     "`!gcpfp` (reply) `!dgcpfp` `!lockgcpfp` `!dlockgcpfp`\n"
                     "`!addbottoken` `!removebottoken`\n"
@@ -662,7 +665,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send(f"✅ Self-react emoji set to {SELF_REACT_EMOJI}")
                 return
 
-            # ---------- OLD LOCK / CLOCK (channel-based) - kept for compatibility ----------
+            # ---------- OLD LOCK / CLOCK (channel-based) ----------
             elif cmd == "dlock":
                 if cid in lock_targets:
                     del lock_targets[cid]
@@ -904,7 +907,74 @@ class RexMasterBot(discord.Client):
                 asyncio.create_task(self.run_attack(cid, cmd, args))
                 return
 
-            # ========== NEW SWIPE COMMANDS ==========
+            # ========== NEW USER‑BASED LOCK & CLOCK (for global auto‑reply) ==========
+            elif cmd == "lockuser":
+                if not message.mentions:
+                    await message.channel.send("❌ Mention the user to lock: `!lockuser @user`")
+                    return
+                target = message.mentions[0]
+                lock_data[target.id] = True
+                if target.id in swipe_loops:
+                    swipe_loops[target.id]['stopped'] = True
+                    self.swipe_tasks.pop(target.id, None)
+                await message.channel.send(f"🔒 **{target.display_name}** locked globally (REX replies).")
+                return
+
+            elif cmd == "unlockuser":
+                if not message.mentions:
+                    await message.channel.send("❌ Mention the user to unlock: `!unlockuser @user`")
+                    return
+                target = message.mentions[0]
+                if target.id in lock_data:
+                    del lock_data[target.id]
+                    await message.channel.send(f"🔓 **{target.display_name}** unlocked.")
+                else:
+                    await message.channel.send(f"❌ {target.display_name} is not locked.")
+                return
+
+            elif cmd == "clockuser":
+                if not message.reference:
+                    await message.channel.send("❌ You need to reply to a user's message to set a clock.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    target = ref_msg.author
+                except:
+                    await message.channel.send("❌ Could not fetch the replied message.")
+                    return
+                if args.strip():
+                    clock_data[target.id] = args.strip()
+                    if target.id in swipe_loops:
+                        swipe_loops[target.id]['stopped'] = True
+                        self.swipe_tasks.pop(target.id, None)
+                    lock_data.pop(target.id, None)
+                    await message.channel.send(f"⏰ Clock set for {target.display_name}: `{args.strip()}`")
+                else:
+                    if target.id in clock_data:
+                        del clock_data[target.id]
+                        await message.channel.send(f"⏰ Clock cleared for {target.display_name}.")
+                    else:
+                        await message.channel.send(f"❌ No clock set for {target.display_name}.")
+                return
+
+            elif cmd == "stopclockuser":
+                if not message.reference:
+                    await message.channel.send("❌ Reply to the user whose clock you want to stop.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    target = ref_msg.author
+                except:
+                    await message.channel.send("❌ Could not fetch the replied message.")
+                    return
+                if target.id in clock_data:
+                    del clock_data[target.id]
+                    await message.channel.send(f"⏰ Clock stopped for {target.display_name}.")
+                else:
+                    await message.channel.send(f"❌ No clock active for {target.display_name}.")
+                return
+
+            # ========== SWIPE COMMANDS (new) ==========
             elif cmd in ["longswipe", "teriswipe", "tmkcswipe"]:
                 if not message.reference:
                     await message.channel.send("❌ You need to reply to a user's message to use this command.")
@@ -964,75 +1034,6 @@ class RexMasterBot(discord.Client):
                     await message.channel.send(f"✅ Stopped swipe for {target.display_name}.")
                 else:
                     await message.channel.send(f"❌ No active swipe for {target.display_name}.")
-                return
-
-            # ========== NEW LOCK (user-based) ==========
-            elif cmd == "lockuser":
-                # (Alternative name to avoid conflict with old lock)
-                if not message.mentions:
-                    await message.channel.send("❌ Mention the user to lock: `!lock @user`")
-                    return
-                target = message.mentions[0]
-                lock_data[target.id] = True
-                if target.id in swipe_loops:
-                    swipe_loops[target.id]['stopped'] = True
-                    self.swipe_tasks.pop(target.id, None)
-                await message.channel.send(f"🔒 **{target.display_name}** locked (global).")
-                return
-
-            elif cmd == "unlockuser":
-                if not message.mentions:
-                    await message.channel.send("❌ Mention the user to unlock: `!unlock @user`")
-                    return
-                target = message.mentions[0]
-                if target.id in lock_data:
-                    del lock_data[target.id]
-                    await message.channel.send(f"🔓 **{target.display_name}** unlocked.")
-                else:
-                    await message.channel.send(f"❌ {target.display_name} is not locked.")
-                return
-
-            # ========== NEW CLOCK (user-based) ==========
-            elif cmd == "clockuser":
-                if not message.reference:
-                    await message.channel.send("❌ You need to reply to a user's message to set a clock.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    target = ref_msg.author
-                except:
-                    await message.channel.send("❌ Could not fetch the replied message.")
-                    return
-                if args.strip():
-                    clock_data[target.id] = args.strip()
-                    if target.id in swipe_loops:
-                        swipe_loops[target.id]['stopped'] = True
-                        self.swipe_tasks.pop(target.id, None)
-                    lock_data.pop(target.id, None)
-                    await message.channel.send(f"⏰ Clock set for {target.display_name}: `{args.strip()}`")
-                else:
-                    if target.id in clock_data:
-                        del clock_data[target.id]
-                        await message.channel.send(f"⏰ Clock cleared for {target.display_name}.")
-                    else:
-                        await message.channel.send(f"❌ No clock set for {target.display_name}.")
-                return
-
-            elif cmd == "stopclockuser":
-                if not message.reference:
-                    await message.channel.send("❌ Reply to the user whose clock you want to stop.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    target = ref_msg.author
-                except:
-                    await message.channel.send("❌ Could not fetch the replied message.")
-                    return
-                if target.id in clock_data:
-                    del clock_data[target.id]
-                    await message.channel.send(f"⏰ Clock stopped for {target.display_name}.")
-                else:
-                    await message.channel.send(f"❌ No clock active for {target.display_name}.")
                 return
 
             # ========== PROFILE CLONING ==========
@@ -1188,6 +1189,7 @@ class RexMasterBot(discord.Client):
             return
 
         author = message.author
+        cid = message.channel.id
 
         # --- NEW USER-BASED SYSTEMS (Priority: Clock > Lock > Swipe) ---
         if author.id in clock_data:
@@ -1205,10 +1207,9 @@ class RexMasterBot(discord.Client):
                 pass
             return
 
-        # Swipe is handled by the dedicated loop - do nothing here.
+        # Swipe is handled by the dedicated loop – nothing here.
 
         # --- OLD CHANNEL-BASED LOCK (for compatibility) ---
-        cid = message.channel.id
         if is_sudo:
             if cid in lock_targets and message.author.id == lock_targets[cid]:
                 reply_text = lock_messages.get(cid, random.choice(REX_LIST))
