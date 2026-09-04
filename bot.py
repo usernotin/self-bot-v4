@@ -250,7 +250,7 @@ TMKCSWIPE_LINES = [
 ]
 
 # --- GLOBALS ---
-swipe_loops = {}  # {user_id: {'task': asyncio.Task, 'lines': list, 'message_id': int}}
+swipe_loops = {}  # {user_id: {'stopped': False, 'lines': list, 'message_id': int, 'channel_id': int}}
 lock_data = {}    # user_id -> True
 clock_data = {}   # user_id -> custom_message
 
@@ -265,7 +265,7 @@ react_targets = {}
 active_bots = {}
 locked_pfp = {}
 start_time = None
-global_react_target = None
+global_react_target = None  # (user_id, emoji)
 copycat_mode = set()
 purge_from_ids = {}
 
@@ -377,34 +377,27 @@ class RexMasterBot(discord.Client):
             return
 
         while True:
-            # Check if this swipe should stop
             if target_user_id not in swipe_loops:
                 break
             if swipe_loops[target_user_id].get('stopped', False):
                 break
 
             try:
-                # Get next line
                 if index >= len(lines):
                     index = 0
                 reply_text = lines[index]
                 index += 1
 
-                # Reply to the message
                 sent = await target_msg.reply(reply_text, mention_author=False)
                 await sent.add_reaction("🤣")
-
-                # Wait before next reply
                 await asyncio.sleep(self.msg_delay)
 
             except discord.errors.NotFound:
-                # Message was deleted - stop the loop
                 break
             except Exception as e:
                 logger.error(f"Swipe loop error: {e}")
                 await asyncio.sleep(1)
 
-        # Clean up
         swipe_loops.pop(target_user_id, None)
 
     async def on_message(self, message):
@@ -414,9 +407,10 @@ class RexMasterBot(discord.Client):
         is_sudo = message.author.id in SUDO_USERS
         is_self = message.author.id == self.user.id
 
+        # --- COMMAND HANDLING ---
         if message.content.startswith(PREFIX):
             if not is_sudo and not is_self:
-                await message.reply("𝙍𝙀𝙓 𝘽𝘼𝘼𝙋 𝙎𝙀 𝙎𝙐𝘿𝙊 𝙇𝙀𝙆𝙀 𝘼𝘼 𝘽𝙃𝙄𝙆𝘼𝙍𝙄")
+                await message.reply("𝙆𝙃𝘼𝘿𝙀 𝙃𝙊 𝘾𝙃𝘼𝙈𝘼𝙍 𝙎𝙐𝘿𝙊 𝙆𝙀 𝙇𝙄𝙔𝙀 𝙂𝙐𝙍𝙐 𝘿𝘼𝙆𝙎𝙃𝙄𝙉𝘼 𝙈𝙀 𝙈𝙀𝙍𝘼 𝙇𝙐𝙉𝘿 𝙋𝘼𝙆𝘼𝘿")
                 return
 
             parts = message.content[len(PREFIX):].split()
@@ -424,6 +418,7 @@ class RexMasterBot(discord.Client):
             args = " ".join(parts[1:]) if len(parts) > 1 else ""
             cid = message.channel.id
 
+            # --- HELP ---
             if cmd in ["help", "menu"]:
                 menu_text = (
                     "```yaml\n"
@@ -448,19 +443,10 @@ class RexMasterBot(discord.Client):
                     "`!clock <msg>` (reply) `!stopclock` (reply)\n\n"
                     "**▸ PROFILE CLONING**\n"
                     "`!clone` (reply) `!normal` `!saveprf <name>` `!loadprf <name>` `!listsaveprf`\n\n"
-                    "**▸ TARGET MODULES**\n"
-                    "`!target` `!targetslide`\n\n"
-                    "**▸ SUDO CONTROL**\n"
-                    "`!addsudo` `!delsudo`\n\n"
+                    "**▸ REACT**\n"
+                    "`!react :emoji: @user` `!dreact`\n\n"
                     "**▸ BOT MANAGEMENT**\n"
-                    "`!minereact` `!dminereact` `!react` `!dreact`\n"
-                    "`!tts` (echo) `!dtts` `!activebots` `!leave`\n"
-                    "`!gcpfp` (reply) `!dgcpfp` `!lockgcpfp` `!dlockgcpfp`\n"
-                    "`!addbottoken` `!removebottoken`\n"
-                    "`!purge <num>` `!purgefrom` `!purgehere` `!joingc` `!invgc`\n"
-                    "`!bypassflood`\n\n"
-                    "**▸ KILL SWITCHES**\n"
-                    "`!stop`\n\n"
+                    "`!addbottoken` `!removebottoken` `!activebots` `!stop`\n\n"
                     "```fix\n"
                     "⚡ REX QTY CORE ACTIVE ⚡\n"
                     "```"
@@ -468,6 +454,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send(menu_text)
                 return
 
+            # --- STOP ---
             elif cmd == "stop":
                 if cid in self.active_loops:
                     self.active_loops[cid]["spam"] = False
@@ -477,12 +464,12 @@ class RexMasterBot(discord.Client):
                 copycat_mode.discard(cid)
                 global_react_target = None
                 self.pending_tasks.pop(cid, None)
-                # Stop all swipe loops
                 for uid in list(swipe_loops.keys()):
                     swipe_loops[uid]['stopped'] = True
                 await message.channel.send("🛑 **ALL LOOPS & FEATURES KILLED**")
                 return
 
+            # --- NC/SPAM STOP ---
             elif cmd == "dnc":
                 if cid in self.active_loops: self.active_loops[cid]["nc"] = False
                 self.pending_tasks.pop(cid, None)
@@ -503,6 +490,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send("🔁 Echo mode OFF")
                 return
 
+            # --- STATUS, PING, etc. ---
             elif cmd == "status":
                 latency_ms = round(self.latency * 1000)
                 active_nc = sum(1 for v in self.active_loops.values() if v.get("nc"))
@@ -558,6 +546,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send(f"🛑 **{cmd.upper()} STOPPED**")
                 return
 
+            # --- SUDO ---
             elif cmd == "addsudo" and is_self:
                 for u in message.mentions:
                     if u.id not in SUDO_USERS: SUDO_USERS.append(u.id)
@@ -569,13 +558,10 @@ class RexMasterBot(discord.Client):
                 await message.channel.send("👑 **SUDO USERS REMOVED**")
                 return
 
+            # --- REACT ---
             elif cmd == "dreact":
                 global_react_target = None
                 await message.channel.send("🔴 **Global react removed**")
-                return
-            elif cmd == "dminereact":
-                SELF_REACT_EMOJI = None
-                await message.channel.send("🔕 **Self-react emoji disabled.**")
                 return
             elif cmd == "react":
                 if not message.mentions or not args:
@@ -584,94 +570,10 @@ class RexMasterBot(discord.Client):
                 user = message.mentions[0]
                 emoji = args.split(" ")[0]
                 global_react_target = (user.id, emoji)
-                await message.channel.send(f"🎯 Global react to **{user.display_name}** with {emoji}")
-                return
-            elif cmd == "minereact":
-                if not args:
-                    await message.channel.send("Usage: `!minereact :emoji:`")
-                    return
-                SELF_REACT_EMOJI = args.strip()
-                await message.channel.send(f"✅ Self-react emoji set to {SELF_REACT_EMOJI}")
+                await message.channel.send(f"🎯 Will react to **{user.display_name}** messages with {emoji}")
                 return
 
-            elif cmd == "tts":
-                if not args:
-                    if cid in copycat_mode:
-                        copycat_mode.discard(cid)
-                        await message.channel.send("🔁 Copycat mode OFF")
-                    else:
-                        copycat_mode.add(cid)
-                        await message.channel.send("🔁 Copycat mode ON – I'll mirror your messages instantly.")
-                    return
-                await message.channel.send(f"[TTS DISABLED] {args}")
-                return
-
-            elif cmd == "activebots":
-                if not active_bots:
-                    await message.channel.send("No active bots recorded yet.")
-                else:
-                    lines = [f"• **{data['name']}** – {data['status']}" for uid, data in active_bots.items()]
-                    await message.channel.send("**Active Bots:**\n" + "\n".join(lines))
-                return
-
-            elif cmd == "leave":
-                if message.guild:
-                    await message.channel.send("👋 Leaving server...")
-                    await message.guild.leave()
-                elif isinstance(message.channel, discord.GroupChannel):
-                    await message.channel.send("👋 Leaving group...")
-                    await message.channel.leave()
-                else:
-                    await message.channel.send("This command can only be used in a server or group DM.")
-                return
-
-            elif cmd == "gcpfp":
-                if not message.reference:
-                    await message.channel.send("Reply to an image with `!gcpfp` to set & lock the server/group icon.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    if ref_msg.attachments:
-                        img_url = ref_msg.attachments[0].url
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(img_url) as resp: img_bytes = await resp.read()
-                        if message.guild:
-                            await message.guild.edit(icon=img_bytes)
-                            locked_pfp[message.guild.id] = img_bytes
-                            await message.channel.send("✅ Server icon updated & locked.")
-                        elif isinstance(message.channel, discord.GroupChannel):
-                            await message.channel.edit(icon=img_bytes)
-                            locked_pfp[message.channel.id] = img_bytes
-                            await message.channel.send("✅ Group icon updated & locked.")
-                        else:
-                            await message.channel.send("This command can only be used in a server or group DM.")
-                    else:
-                        await message.channel.send("No image found in the replied message.")
-                except Exception as e:
-                    await message.channel.send(f"Failed to change icon: {e}")
-                return
-            elif cmd == "dgcpfp":
-                if not message.guild: return await message.channel.send("This command only works in a server.")
-                try: await message.guild.edit(icon=None); await message.channel.send("🗑️ **Server icon removed.**")
-                except Exception as e: await message.channel.send(f"Failed to remove icon: {e}")
-                return
-            elif cmd == "lockgcpfp":
-                if not message.guild: return await message.channel.send("This command only works in a server.")
-                try:
-                    if message.guild.icon:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(message.guild.icon.url) as resp: img_bytes = await resp.read()
-                        locked_pfp[message.guild.id] = img_bytes
-                        await message.channel.send("🔒 **Server icon locked.** Any changes will be reverted.")
-                    else: await message.channel.send("Server has no icon to lock.")
-                except Exception as e: await message.channel.send(f"Failed to lock icon: {e}")
-                return
-            elif cmd == "dlockgcpfp":
-                if message.guild and message.guild.id in locked_pfp:
-                    del locked_pfp[message.guild.id]; await message.channel.send("🔓 **Server icon lock removed.**")
-                else: await message.channel.send("No icon lock active or not in server.")
-                return
-
+            # --- OTHER COMMANDS ---
             elif cmd == "addbottoken" and is_self:
                 if not args: await message.channel.send("Usage: `!addbottoken <token>`"); return
                 token = args.strip()
@@ -692,93 +594,23 @@ class RexMasterBot(discord.Client):
                 else: await message.channel.send("Token not found.")
                 return
 
-            elif cmd == "purge":
-                if not args.isdigit():
-                    await message.channel.send("Usage: `!purge <amount>`")
-                    return
-                amount = int(args)
-                async for msg in message.channel.history(limit=amount+1):
-                    try: await msg.delete()
-                    except: pass
-                    await asyncio.sleep(0.5)
-                return
-            elif cmd == "purgefrom":
-                if not message.reference:
-                    await message.channel.send("Reply to the **start** message with `!purgefrom`")
-                    return
-                purge_from_ids[cid] = message.reference.message_id
-                await message.channel.send("✅ Start message saved. Now reply to the **end** message with `!purgehere`")
-                return
-            elif cmd == "purgehere":
-                if not message.reference or cid not in purge_from_ids:
-                    await message.channel.send("You must first set a start message with `!purgefrom` (reply to it), then reply to the end message with `!purgehere`")
-                    return
-                from_id = purge_from_ids.pop(cid)
-                to_id = message.reference.message_id
-                after = await message.channel.fetch_message(from_id)
-                before = await message.channel.fetch_message(to_id)
-                async for msg in message.channel.history(limit=100, before=before, after=after):
-                    try: await msg.delete()
-                    except: pass
-                    await asyncio.sleep(0.5)
-                try: await after.delete()
-                except: pass
-                try: await before.delete()
-                except: pass
+            elif cmd == "activebots":
+                if not active_bots:
+                    await message.channel.send("No active bots recorded yet.")
+                else:
+                    lines = [f"• **{data['name']}** – {data['status']}" for uid, data in active_bots.items()]
+                    await message.channel.send("**Active Bots:**\n" + "\n".join(lines))
                 return
 
-            elif cmd == "picspm":
-                if not message.reference:
-                    await message.channel.send("Reply to an image with `!picspm` to spam it.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    if not ref_msg.attachments:
-                        await message.channel.send("No image in the replied message.")
-                        return
-                    img_url = ref_msg.attachments[0].url
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(img_url) as resp:
-                            img_bytes = await resp.read()
-                    file = discord.File(BytesIO(img_bytes), filename="spam.png")
-                    if cid not in self.active_loops:
-                        self.active_loops[cid] = {"spam": False, "nc": False}
-                    self.active_loops[cid]["spam"] = True
-                    self.pending_tasks[cid] = ("picspm", args)
-                    channel = self.get_channel(cid)
-                    if not channel: return
-                    while self.active_loops[cid]["spam"]:
-                        try:
-                            await channel.send(file=file)
-                            file = discord.File(BytesIO(img_bytes), filename="spam.png")
-                            await asyncio.sleep(self.msg_delay)
-                        except:
-                            await asyncio.sleep(2)
-                except Exception as e:
-                    await message.channel.send(f"Failed: {e}")
-                return
-
-            elif cmd == "joingc":
-                invite_link = args
-                if not invite_link:
-                    await message.channel.send("Provide an invite link: `!joingc https://discord.gg/...`")
-                    return
-                try:
-                    invite = await self.fetch_invite(invite_link)
-                    await invite.accept()
-                    await message.channel.send("✅ Joined the group/channel.")
-                except Exception as e:
-                    await message.channel.send(f"Failed to join: {e}")
-                return
-            elif cmd == "invgc":
-                if not message.mentions:
-                    await message.channel.send("Mention users to create a group with them.")
-                    return
-                try:
-                    group = await self.create_group(message.mentions)
-                    await message.channel.send(f"✅ Group created: {group.name} (ID: {group.id})")
-                except Exception as e:
-                    await message.channel.send(f"Failed to create group: {e}")
+            elif cmd == "leave":
+                if message.guild:
+                    await message.channel.send("👋 Leaving server...")
+                    await message.guild.leave()
+                elif isinstance(message.channel, discord.GroupChannel):
+                    await message.channel.send("👋 Leaving group...")
+                    await message.channel.leave()
+                else:
+                    await message.channel.send("This command can only be used in a server or group DM.")
                 return
 
             elif cmd == "bypassflood":
@@ -805,12 +637,10 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Could not fetch the replied message.")
                     return
 
-                # Stop any existing swipe for this user
                 if target.id in swipe_loops:
                     swipe_loops[target.id]['stopped'] = True
                     await asyncio.sleep(0.5)
 
-                # Select the correct list
                 if cmd == "longswipe":
                     lines = LONGSWIPE_LINES
                 elif cmd == "teriswipe":
@@ -818,7 +648,6 @@ class RexMasterBot(discord.Client):
                 else:
                     lines = TMKCSWIPE_LINES
 
-                # Store the swipe info
                 swipe_loops[target.id] = {
                     'stopped': False,
                     'lines': lines,
@@ -826,7 +655,6 @@ class RexMasterBot(discord.Client):
                     'channel_id': target_msg.channel.id
                 }
 
-                # Start the swipe loop
                 task = asyncio.create_task(
                     self.run_swipe_loop(
                         target.id,
@@ -838,8 +666,7 @@ class RexMasterBot(discord.Client):
                 )
                 self.swipe_tasks[target.id] = task
 
-                await message.channel.send(f"✅ **{cmd.upper()}** activated for {target.display_name}. Will reply to that message continuously until !stopswipe.")
-
+                await message.channel.send(f"✅ **{cmd.upper()}** activated for {target.display_name}.")
                 return
 
             elif cmd == "stopswipe":
@@ -855,25 +682,23 @@ class RexMasterBot(discord.Client):
 
                 if target.id in swipe_loops:
                     swipe_loops[target.id]['stopped'] = True
-                    # Clean up task reference
                     self.swipe_tasks.pop(target.id, None)
                     await message.channel.send(f"✅ Stopped swipe for {target.display_name}.")
                 else:
                     await message.channel.send(f"❌ No active swipe for {target.display_name}.")
                 return
 
-            # ========== LOCK COMMANDS ==========
+            # ========== LOCK ==========
             elif cmd == "lock":
                 if not message.mentions:
                     await message.channel.send("❌ Mention the user to lock: `!lock @user`")
                     return
                 target = message.mentions[0]
                 lock_data[target.id] = True
-                # Remove any swipe for this user
                 if target.id in swipe_loops:
                     swipe_loops[target.id]['stopped'] = True
                     self.swipe_tasks.pop(target.id, None)
-                await message.channel.send(f"🔒 **{target.display_name}** locked (will reply with REX lines).")
+                await message.channel.send(f"🔒 **{target.display_name}** locked.")
                 return
 
             elif cmd == "unlock":
@@ -888,7 +713,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send(f"❌ {target.display_name} is not locked.")
                 return
 
-            # ========== CLOCK COMMANDS ==========
+            # ========== CLOCK ==========
             elif cmd == "clock":
                 if not message.reference:
                     await message.channel.send("❌ You need to reply to a user's message to set a clock.")
@@ -901,7 +726,6 @@ class RexMasterBot(discord.Client):
                     return
                 if args.strip():
                     clock_data[target.id] = args.strip()
-                    # Remove any swipe for this user
                     if target.id in swipe_loops:
                         swipe_loops[target.id]['stopped'] = True
                         self.swipe_tasks.pop(target.id, None)
@@ -932,7 +756,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send(f"❌ No clock active for {target.display_name}.")
                 return
 
-            # ========== PROFILE CLONING ==========
+            # ========== PROFILE ==========
             elif cmd == "clone":
                 if not message.reference:
                     await message.channel.send("❌ Reply to the user whose profile you want to clone.")
@@ -944,14 +768,10 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Could not fetch the replied message.")
                     return
 
-                # Get target's DISPLAY NAME (not username)
                 new_display_name = target.display_name
-                # Get target's avatar URL
                 avatar_url = target.display_avatar.url
-                # Try to get bio (about me) - might not work for self-bots
                 bio = getattr(target, "bio", "")
 
-                # Download avatar
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(avatar_url) as resp:
@@ -960,28 +780,23 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Failed to download avatar.")
                     return
 
-                # Apply changes to the bot's own profile
-                # Change global display name (username) - this changes the actual username
                 try:
                     await self.user.edit(username=new_display_name)
                 except Exception as e:
                     logger.warning(f"Could not change username: {e}")
 
-                # Change nickname in the current guild (if in a guild)
                 if message.guild:
                     try:
                         await message.guild.me.edit(nick=new_display_name)
                     except Exception as e:
                         logger.warning(f"Could not change nickname: {e}")
 
-                # Change avatar
                 try:
                     await self.user.edit(avatar=avatar_bytes)
                 except Exception as e:
                     await message.channel.send(f"❌ Failed to change avatar: {e}")
                     return
 
-                # Store original profile if not already stored
                 if not original_profile:
                     orig_name = self.user.display_name
                     orig_avatar = self.user.display_avatar.url
@@ -995,15 +810,14 @@ class RexMasterBot(discord.Client):
                     profiles["original"] = original_profile
                     save_profiles(profiles)
 
-                await message.channel.send(f"✅ Cloned profile of **{target.display_name}** (display name, avatar, bio).")
+                await message.channel.send(f"✅ Cloned profile of **{target.display_name}**.")
                 return
 
             elif cmd == "normal":
                 if not original_profile:
-                    await message.channel.send("❌ No original profile saved. Use `!clone` first to store it.")
+                    await message.channel.send("❌ No original profile saved. Use `!clone` first.")
                     return
 
-                # Restore original name, avatar, bio
                 try:
                     await self.user.edit(username=original_profile["name"])
                 except Exception as e:
@@ -1025,7 +839,7 @@ class RexMasterBot(discord.Client):
                     return
 
                 current_profile_name = None
-                await message.channel.send("✅ Restored original profile (display name, avatar).")
+                await message.channel.send("✅ Restored original profile.")
                 return
 
             elif cmd == "saveprf":
@@ -1033,7 +847,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Provide a name: `!saveprf <name>`")
                     return
                 if not message.guild:
-                    await message.channel.send("❌ This command can only be used in a server (to get nickname).")
+                    await message.channel.send("❌ This command can only be used in a server.")
                     return
                 current_name = message.guild.me.display_name
                 current_avatar_url = self.user.display_avatar.url
@@ -1092,15 +906,15 @@ class RexMasterBot(discord.Client):
                 return
 
             else:
-                await message.channel.send(f"❌ Unknown command: `{cmd}`. Use `!help` for available commands.")
+                await message.channel.send(f"❌ Unknown command: `{cmd}`. Use `!help`.")
 
-        # --- AUTO-REPLY SYSTEMS (Clock > Lock > Swipe) ---
+        # --- AUTO-REPLY SYSTEMS ---
         if is_self:
             return
 
         author = message.author
-        
-        # Clock - highest priority
+
+        # Clock
         if author.id in clock_data:
             try:
                 await message.reply(clock_data[author.id], mention_author=False)
@@ -1108,7 +922,7 @@ class RexMasterBot(discord.Client):
                 pass
             return
 
-        # Lock - second priority
+        # Lock
         if author.id in lock_data:
             try:
                 reply_text = random.choice(REX_LIST)
@@ -1117,14 +931,31 @@ class RexMasterBot(discord.Client):
                 pass
             return
 
-        # Swipe - third priority (only if not locked or clocked)
-        if author.id in swipe_loops and not swipe_loops[author.id].get('stopped', False):
-            # Swipe is handled by the dedicated loop on the specific message
-            # We don't need to do anything here - the loop handles it.
-            pass
+        # Swipe is handled by the loop; nothing else needed.
+
+        # ========== REACT (FIXED: removed is_sudo check) ==========
+        if global_react_target and message.author.id == global_react_target[0]:
+            try:
+                await message.add_reaction(global_react_target[1])
+            except:
+                pass
+
+        # Copycat (only for sudo users)
+        cid = message.channel.id
+        if is_sudo:
+            if cid in copycat_mode:
+                if message.reference:
+                    try:
+                        ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                        if ref_msg:
+                            await ref_msg.reply(message.content, mention_author=False)
+                    except:
+                        pass
+                else:
+                    await message.channel.send(message.content)
 
     async def run_attack(self, cid, cmd, args):
-        # Same as original - keep all attack functionality
+        # Same as original (kept for NC/SPAM functionality)
         is_nc = cmd in ["nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]
         loop_type = "nc" if is_nc else "spam"
 
