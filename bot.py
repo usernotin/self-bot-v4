@@ -249,15 +249,16 @@ TMKCSWIPE_LINES = [
     "tmkc me tie","tmkc me tree","tmkc me keede","tmkc pe aalu","tmkc me blue light","tmkc me red light","tmkc me dino"
 ]
 
-# --- GLOBALS ---
-swipe_loops = {}  # {user_id: {'stopped': False, 'lines': list, 'message_id': int, 'channel_id': int}}
+# --- GLOBALS FOR NEW SYSTEMS ---
+swipe_loops = {}  # user_id -> {'stopped': False, 'lines': list, 'message_id': int, 'channel_id': int}
 lock_data = {}    # user_id -> True
 clock_data = {}   # user_id -> custom_message
 
-original_profile = {}   # will store name, avatar_url, bio
+original_profile = {}
 saved_profiles = {}
 current_profile_name = None
 
+# --- ORIGINAL BOT MANAGEMENT GLOBALS ---
 SELF_REACT_EMOJI = None
 lock_targets = {}
 lock_messages = {}
@@ -269,7 +270,7 @@ global_react_target = None  # (user_id, emoji)
 copycat_mode = set()
 purge_from_ids = {}
 
-# --- REX LISTS ---
+# --- REX LISTS (unchanged) ---
 REX_LIST = [
     "चुदाई Kha 😂❤️", "उठक बैठक लगा 😏🔥", "तेरी माँ चोदू 😍😍", "ओय कमजोर 🤢🤢", 
     "लंड चूस 🥱🤍➿", "पिल्लै 🐕‍", "😱 arey 😉 ye 🤡 kaise 😋 kiya 😏 re 😁 teri 😊 maa 😍 randy 😭100% 😂",
@@ -364,13 +365,12 @@ class RexMasterBot(discord.Client):
         self.pending_tasks = {}
         self.swipe_tasks = {}  # user_id -> asyncio.Task
 
+    # --- SWIPE LOOP ---
     async def run_swipe_loop(self, target_user_id, message_id, channel_id, lines, swipe_type):
-        """Continuously reply to the same message with lines from the list."""
         index = 0
         channel = self.get_channel(channel_id)
         if not channel:
             return
-        
         try:
             target_msg = await channel.fetch_message(message_id)
         except:
@@ -400,562 +400,8 @@ class RexMasterBot(discord.Client):
 
         swipe_loops.pop(target_user_id, None)
 
-    async def on_message(self, message):
-        global SELF_REACT_EMOJI, global_react_target
-        global swipe_loops, lock_data, clock_data, original_profile, saved_profiles, current_profile_name
-
-        is_sudo = message.author.id in SUDO_USERS
-        is_self = message.author.id == self.user.id
-
-        # --- COMMAND HANDLING ---
-        if message.content.startswith(PREFIX):
-            if not is_sudo and not is_self:
-                await message.reply("𝙆𝙃𝘼𝘿𝙀 𝙃𝙊 𝘾𝙃𝘼𝙈𝘼𝙍 𝙎𝙐𝘿𝙊 𝙆𝙀 𝙇𝙄𝙔𝙀 𝙂𝙐𝙍𝙐 𝘿𝘼𝙆𝙎𝙃𝙄𝙉𝘼 𝙈𝙀 𝙈𝙀𝙍𝘼 𝙇𝙐𝙉𝘿 𝙋𝘼𝙆𝘼𝘿")
-                return
-
-            parts = message.content[len(PREFIX):].split()
-            cmd = parts[0].lower()
-            args = " ".join(parts[1:]) if len(parts) > 1 else ""
-            cid = message.channel.id
-
-            # --- HELP ---
-            if cmd in ["help", "menu"]:
-                menu_text = (
-                    "```yaml\n"
-                    "╔══════════════════════════════════════╗\n"
-                    "║    ⛩️  REX QTY MASTER MENU  ⛩️    ║\n"
-                    "║     「 GAWD EDITION 」               ║\n"
-                    "╚══════════════════════════════════════╝\n"
-                    "```\n"
-                    "**▸ SYSTEM**\n"
-                    "`!status` `!ping` `!refresh` `!spamdelay` `!ncdelay` `!uptime`\n\n"
-                    "**▸ NC ENGINE**\n"
-                    "`!nc` `!ncc` `!enc` `!rexnc` `!longnc` `!baapnc` `!timenc` `!spmnc`\n"
-                    "`!dnc` `!dlongnc` `!dbaapnc` `!dtimenc` `!dspmnc`\n\n"
-                    "**▸ SPAM ENGINE**\n"
-                    "`!spam` `!espam` `!rexspam` `!cspam` `!chudai`\n"
-                    "`!rexswipe` `!eswipe` `!cswipe` `!target` `!targetslide` `!picspm`\n"
-                    "`!dspam` `!dswipe` `!dtarget`\n\n"
-                    "**▸ SWIPE SYSTEMS**\n"
-                    "`!longswipe` (reply) `!teriswipe` (reply) `!tmkcswipe` (reply) `!stopswipe` (reply)\n\n"
-                    "**▸ LOCK & CLOCK**\n"
-                    "`!lock @user` `!unlock @user`\n"
-                    "`!clock <msg>` (reply) `!stopclock` (reply)\n\n"
-                    "**▸ PROFILE CLONING**\n"
-                    "`!clone` (reply) `!normal` `!saveprf <name>` `!loadprf <name>` `!listsaveprf`\n\n"
-                    "**▸ REACT**\n"
-                    "`!react :emoji: @user` `!dreact`\n\n"
-                    "**▸ BOT MANAGEMENT**\n"
-                    "`!addbottoken` `!removebottoken` `!activebots` `!stop`\n\n"
-                    "```fix\n"
-                    "⚡ REX QTY CORE ACTIVE ⚡\n"
-                    "```"
-                )
-                await message.channel.send(menu_text)
-                return
-
-            # --- STOP ---
-            elif cmd == "stop":
-                if cid in self.active_loops:
-                    self.active_loops[cid]["spam"] = False
-                    self.active_loops[cid]["nc"] = False
-                lock_targets.pop(cid, None)
-                lock_messages.pop(cid, None)
-                copycat_mode.discard(cid)
-                global_react_target = None
-                self.pending_tasks.pop(cid, None)
-                for uid in list(swipe_loops.keys()):
-                    swipe_loops[uid]['stopped'] = True
-                await message.channel.send("🛑 **ALL LOOPS & FEATURES KILLED**")
-                return
-
-            # --- NC/SPAM STOP ---
-            elif cmd == "dnc":
-                if cid in self.active_loops: self.active_loops[cid]["nc"] = False
-                self.pending_tasks.pop(cid, None)
-                await message.channel.send("🛑 **NC LOOP STOPPED**")
-                return
-            elif cmd == "dspam":
-                if cid in self.active_loops: self.active_loops[cid]["spam"] = False
-                self.pending_tasks.pop(cid, None)
-                await message.channel.send("🛑 **SPAM LOOP STOPPED**")
-                return
-            elif cmd in ["dswipe", "dtarget"]:
-                if cid in self.active_loops: self.active_loops[cid]["spam"] = False
-                self.pending_tasks.pop(cid, None)
-                await message.channel.send("🛑 **SWIPE/TARGET LOOP STOPPED**")
-                return
-            elif cmd == "dtts":
-                copycat_mode.discard(cid)
-                await message.channel.send("🔁 Echo mode OFF")
-                return
-
-            # --- STATUS, PING, etc. ---
-            elif cmd == "status":
-                latency_ms = round(self.latency * 1000)
-                active_nc = sum(1 for v in self.active_loops.values() if v.get("nc"))
-                active_spam = sum(1 for v in self.active_loops.values() if v.get("spam"))
-                memory = psutil.Process(os.getpid()).memory_info().rss // 1024 // 1024
-                guilds = len(self.guilds)
-                status_text = (
-                    f"**Bot Health Status**\n"
-                    f"• Latency: `{latency_ms}ms`\n"
-                    f"• Active NC loops: `{active_nc} channels`\n"
-                    f"• Active spam loops: `{active_spam} channels`\n"
-                    f"• Active swipes: `{len(swipe_loops)}`\n"
-                    f"• Memory usage: `{memory} MB`\n"
-                    f"• Servers: `{guilds}`"
-                )
-                await message.channel.send(status_text)
-                return
-            elif cmd == "uptime":
-                if not start_time:
-                    await message.channel.send("Uptime not available yet.")
-                else:
-                    delta = datetime.utcnow() - start_time
-                    hours, remainder = divmod(int(delta.total_seconds()), 3600)
-                    minutes, seconds = divmod(remainder, 60)
-                    await message.channel.send(f"⏱️ Uptime: `{hours}h {minutes}m {seconds}s`")
-                return
-            elif cmd == "ping":
-                latency = round(self.latency * 1000)
-                await message.channel.send(f"🏓 **Pong!** `{latency}ms`")
-                return
-            elif cmd == "refresh":
-                if cid in self.active_loops:
-                    self.active_loops[cid]["spam"] = False
-                    self.active_loops[cid]["nc"] = False
-                gc.collect()
-                await message.channel.send("🔄 **Bot refreshed & optimised. Speed tuned.**")
-                return
-
-            elif cmd == "spamdelay":
-                ms = float(args) if args else 800
-                self.msg_delay = ms / 1000
-                await message.channel.send(f"spam delay set {int(ms)}ms")
-                return
-            elif cmd == "ncdelay":
-                ms = float(args) if args else 2500
-                self.nc_delay = ms / 1000
-                await message.channel.send(f"NC delay set {int(ms)}ms")
-                return
-
-            elif cmd in ["dlongnc", "dbaapnc", "dtimenc", "dspmnc"]:
-                if cid in self.active_loops: self.active_loops[cid]["nc"] = False
-                self.pending_tasks.pop(cid, None)
-                await message.channel.send(f"🛑 **{cmd.upper()} STOPPED**")
-                return
-
-            # --- SUDO ---
-            elif cmd == "addsudo" and is_self:
-                for u in message.mentions:
-                    if u.id not in SUDO_USERS: SUDO_USERS.append(u.id)
-                await message.channel.send("👑 **SUDO USERS ADDED**")
-                return
-            elif cmd == "delsudo" and is_self:
-                for u in message.mentions:
-                    if u.id in SUDO_USERS: SUDO_USERS.remove(u.id)
-                await message.channel.send("👑 **SUDO USERS REMOVED**")
-                return
-
-            # --- REACT ---
-            elif cmd == "dreact":
-                global_react_target = None
-                await message.channel.send("🔴 **Global react removed**")
-                return
-            elif cmd == "react":
-                if not message.mentions or not args:
-                    await message.channel.send("Usage: `!react :emoji: @user`")
-                    return
-                user = message.mentions[0]
-                emoji = args.split(" ")[0]
-                global_react_target = (user.id, emoji)
-                await message.channel.send(f"🎯 Will react to **{user.display_name}** messages with {emoji}")
-                return
-
-            # --- OTHER COMMANDS ---
-            elif cmd == "addbottoken" and is_self:
-                if not args: await message.channel.send("Usage: `!addbottoken <token>`"); return
-                token = args.strip()
-                if token not in TOKENS:
-                    TOKENS.append(token)
-                    save_tokens(TOKENS)
-                    Thread(target=start_bot, args=(token,), daemon=True).start()
-                    await message.channel.send("✅ Token added and bot started.")
-                else: await message.channel.send("Token already exists.")
-                return
-            elif cmd == "removebottoken" and is_self:
-                if not args: await message.channel.send("Usage: `!removebottoken <token>`"); return
-                token = args.strip()
-                if token in TOKENS:
-                    TOKENS.remove(token)
-                    save_tokens(TOKENS)
-                    await message.channel.send("✅ Token removed (bot may still run until restart).")
-                else: await message.channel.send("Token not found.")
-                return
-
-            elif cmd == "activebots":
-                if not active_bots:
-                    await message.channel.send("No active bots recorded yet.")
-                else:
-                    lines = [f"• **{data['name']}** – {data['status']}" for uid, data in active_bots.items()]
-                    await message.channel.send("**Active Bots:**\n" + "\n".join(lines))
-                return
-
-            elif cmd == "leave":
-                if message.guild:
-                    await message.channel.send("👋 Leaving server...")
-                    await message.guild.leave()
-                elif isinstance(message.channel, discord.GroupChannel):
-                    await message.channel.send("👋 Leaving group...")
-                    await message.channel.leave()
-                else:
-                    await message.channel.send("This command can only be used in a server or group DM.")
-                return
-
-            elif cmd == "bypassflood":
-                self.bypass_mode = not self.bypass_mode
-                state = "ON (burst mode – faster NC)" if self.bypass_mode else "OFF (old‑school safe continuous)"
-                await message.channel.send(f"🔥 Bypass mode: {state}")
-                return
-
-            elif cmd in ["spam", "espam", "rexspam", "cspam", "rexswipe", "eswipe", "cswipe", "chudai", "target", "targetslide",
-                         "nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]:
-                asyncio.create_task(self.run_attack(cid, cmd, args))
-                return
-
-            # ========== SWIPE COMMANDS ==========
-            elif cmd in ["longswipe", "teriswipe", "tmkcswipe"]:
-                if not message.reference:
-                    await message.channel.send("❌ You need to reply to a user's message to use this command.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    target = ref_msg.author
-                    target_msg = ref_msg
-                except:
-                    await message.channel.send("❌ Could not fetch the replied message.")
-                    return
-
-                if target.id in swipe_loops:
-                    swipe_loops[target.id]['stopped'] = True
-                    await asyncio.sleep(0.5)
-
-                if cmd == "longswipe":
-                    lines = LONGSWIPE_LINES
-                elif cmd == "teriswipe":
-                    lines = TERISWIPE_LINES
-                else:
-                    lines = TMKCSWIPE_LINES
-
-                swipe_loops[target.id] = {
-                    'stopped': False,
-                    'lines': lines,
-                    'message_id': target_msg.id,
-                    'channel_id': target_msg.channel.id
-                }
-
-                task = asyncio.create_task(
-                    self.run_swipe_loop(
-                        target.id,
-                        target_msg.id,
-                        target_msg.channel.id,
-                        lines,
-                        cmd
-                    )
-                )
-                self.swipe_tasks[target.id] = task
-
-                await message.channel.send(f"✅ **{cmd.upper()}** activated for {target.display_name}.")
-                return
-
-            elif cmd == "stopswipe":
-                if not message.reference:
-                    await message.channel.send("❌ Reply to the user whose swipe you want to stop.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    target = ref_msg.author
-                except:
-                    await message.channel.send("❌ Could not fetch the replied message.")
-                    return
-
-                if target.id in swipe_loops:
-                    swipe_loops[target.id]['stopped'] = True
-                    self.swipe_tasks.pop(target.id, None)
-                    await message.channel.send(f"✅ Stopped swipe for {target.display_name}.")
-                else:
-                    await message.channel.send(f"❌ No active swipe for {target.display_name}.")
-                return
-
-            # ========== LOCK ==========
-            elif cmd == "lock":
-                if not message.mentions:
-                    await message.channel.send("❌ Mention the user to lock: `!lock @user`")
-                    return
-                target = message.mentions[0]
-                lock_data[target.id] = True
-                if target.id in swipe_loops:
-                    swipe_loops[target.id]['stopped'] = True
-                    self.swipe_tasks.pop(target.id, None)
-                await message.channel.send(f"🔒 **{target.display_name}** locked.")
-                return
-
-            elif cmd == "unlock":
-                if not message.mentions:
-                    await message.channel.send("❌ Mention the user to unlock: `!unlock @user`")
-                    return
-                target = message.mentions[0]
-                if target.id in lock_data:
-                    del lock_data[target.id]
-                    await message.channel.send(f"🔓 **{target.display_name}** unlocked.")
-                else:
-                    await message.channel.send(f"❌ {target.display_name} is not locked.")
-                return
-
-            # ========== CLOCK ==========
-            elif cmd == "clock":
-                if not message.reference:
-                    await message.channel.send("❌ You need to reply to a user's message to set a clock.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    target = ref_msg.author
-                except:
-                    await message.channel.send("❌ Could not fetch the replied message.")
-                    return
-                if args.strip():
-                    clock_data[target.id] = args.strip()
-                    if target.id in swipe_loops:
-                        swipe_loops[target.id]['stopped'] = True
-                        self.swipe_tasks.pop(target.id, None)
-                    lock_data.pop(target.id, None)
-                    await message.channel.send(f"⏰ Clock set for {target.display_name}: `{args.strip()}`")
-                else:
-                    if target.id in clock_data:
-                        del clock_data[target.id]
-                        await message.channel.send(f"⏰ Clock cleared for {target.display_name}.")
-                    else:
-                        await message.channel.send(f"❌ No clock set for {target.display_name}.")
-                return
-
-            elif cmd == "stopclock":
-                if not message.reference:
-                    await message.channel.send("❌ Reply to the user whose clock you want to stop.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    target = ref_msg.author
-                except:
-                    await message.channel.send("❌ Could not fetch the replied message.")
-                    return
-                if target.id in clock_data:
-                    del clock_data[target.id]
-                    await message.channel.send(f"⏰ Clock stopped for {target.display_name}.")
-                else:
-                    await message.channel.send(f"❌ No clock active for {target.display_name}.")
-                return
-
-            # ========== PROFILE ==========
-            elif cmd == "clone":
-                if not message.reference:
-                    await message.channel.send("❌ Reply to the user whose profile you want to clone.")
-                    return
-                try:
-                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                    target = ref_msg.author
-                except:
-                    await message.channel.send("❌ Could not fetch the replied message.")
-                    return
-
-                new_display_name = target.display_name
-                avatar_url = target.display_avatar.url
-                bio = getattr(target, "bio", "")
-
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(avatar_url) as resp:
-                            avatar_bytes = await resp.read()
-                except:
-                    await message.channel.send("❌ Failed to download avatar.")
-                    return
-
-                try:
-                    await self.user.edit(username=new_display_name)
-                except Exception as e:
-                    logger.warning(f"Could not change username: {e}")
-
-                if message.guild:
-                    try:
-                        await message.guild.me.edit(nick=new_display_name)
-                    except Exception as e:
-                        logger.warning(f"Could not change nickname: {e}")
-
-                try:
-                    await self.user.edit(avatar=avatar_bytes)
-                except Exception as e:
-                    await message.channel.send(f"❌ Failed to change avatar: {e}")
-                    return
-
-                if not original_profile:
-                    orig_name = self.user.display_name
-                    orig_avatar = self.user.display_avatar.url
-                    orig_bio = getattr(self.user, "bio", "")
-                    original_profile = {
-                        "name": orig_name,
-                        "avatar_url": orig_avatar,
-                        "bio": orig_bio
-                    }
-                    profiles = load_profiles()
-                    profiles["original"] = original_profile
-                    save_profiles(profiles)
-
-                await message.channel.send(f"✅ Cloned profile of **{target.display_name}**.")
-                return
-
-            elif cmd == "normal":
-                if not original_profile:
-                    await message.channel.send("❌ No original profile saved. Use `!clone` first.")
-                    return
-
-                try:
-                    await self.user.edit(username=original_profile["name"])
-                except Exception as e:
-                    logger.warning(f"Could not restore username: {e}")
-
-                if message.guild:
-                    try:
-                        await message.guild.me.edit(nick=original_profile["name"])
-                    except Exception as e:
-                        logger.warning(f"Could not restore nickname: {e}")
-
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(original_profile["avatar_url"]) as resp:
-                            avatar_bytes = await resp.read()
-                    await self.user.edit(avatar=avatar_bytes)
-                except Exception as e:
-                    await message.channel.send(f"❌ Failed to restore avatar: {e}")
-                    return
-
-                current_profile_name = None
-                await message.channel.send("✅ Restored original profile.")
-                return
-
-            elif cmd == "saveprf":
-                if not args:
-                    await message.channel.send("❌ Provide a name: `!saveprf <name>`")
-                    return
-                if not message.guild:
-                    await message.channel.send("❌ This command can only be used in a server.")
-                    return
-                current_name = message.guild.me.display_name
-                current_avatar_url = self.user.display_avatar.url
-                current_bio = getattr(self.user, "bio", "")
-                profiles = load_profiles()
-                if "saved" not in profiles:
-                    profiles["saved"] = {}
-                profiles["saved"][args] = {
-                    "name": current_name,
-                    "avatar_url": current_avatar_url,
-                    "bio": current_bio
-                }
-                save_profiles(profiles)
-                await message.channel.send(f"✅ Profile saved as **{args}**.")
-                return
-
-            elif cmd == "listsaveprf":
-                profiles = load_profiles()
-                saved = profiles.get("saved", {})
-                if not saved:
-                    await message.channel.send("❌ No saved profiles.")
-                else:
-                    names = ", ".join(saved.keys())
-                    await message.channel.send(f"**Saved profiles:** {names}")
-                return
-
-            elif cmd == "loadprf":
-                if not args:
-                    await message.channel.send("❌ Provide a name: `!loadprf <name>`")
-                    return
-                profiles = load_profiles()
-                saved = profiles.get("saved", {})
-                if args not in saved:
-                    await message.channel.send(f"❌ Profile `{args}` not found.")
-                    return
-                prof = saved[args]
-                try:
-                    await self.user.edit(username=prof["name"])
-                except Exception as e:
-                    logger.warning(f"Could not change username: {e}")
-                if message.guild:
-                    try:
-                        await message.guild.me.edit(nick=prof["name"])
-                    except Exception as e:
-                        logger.warning(f"Could not change nickname: {e}")
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(prof["avatar_url"]) as resp:
-                            avatar_bytes = await resp.read()
-                    await self.user.edit(avatar=avatar_bytes)
-                except Exception as e:
-                    await message.channel.send(f"❌ Failed to load avatar: {e}")
-                    return
-                current_profile_name = args
-                await message.channel.send(f"✅ Loaded profile **{args}**.")
-                return
-
-            else:
-                await message.channel.send(f"❌ Unknown command: `{cmd}`. Use `!help`.")
-
-        # --- AUTO-REPLY SYSTEMS ---
-        if is_self:
-            return
-
-        author = message.author
-
-        # Clock
-        if author.id in clock_data:
-            try:
-                await message.reply(clock_data[author.id], mention_author=False)
-            except:
-                pass
-            return
-
-        # Lock
-        if author.id in lock_data:
-            try:
-                reply_text = random.choice(REX_LIST)
-                await message.reply(reply_text, mention_author=False)
-            except:
-                pass
-            return
-
-        # Swipe is handled by the loop; nothing else needed.
-
-        # ========== REACT (FIXED: removed is_sudo check) ==========
-        if global_react_target and message.author.id == global_react_target[0]:
-            try:
-                await message.add_reaction(global_react_target[1])
-            except:
-                pass
-
-        # Copycat (only for sudo users)
-        cid = message.channel.id
-        if is_sudo:
-            if cid in copycat_mode:
-                if message.reference:
-                    try:
-                        ref_msg = await message.channel.fetch_message(message.reference.message_id)
-                        if ref_msg:
-                            await ref_msg.reply(message.content, mention_author=False)
-                    except:
-                        pass
-                else:
-                    await message.channel.send(message.content)
-
+    # --- ATTACK LOOP (ORIGINAL) ---
     async def run_attack(self, cid, cmd, args):
-        # Same as original (kept for NC/SPAM functionality)
         is_nc = cmd in ["nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]
         loop_type = "nc" if is_nc else "spam"
 
@@ -1024,6 +470,774 @@ class RexMasterBot(discord.Client):
 
         self.pending_tasks.pop(cid, None)
 
+    # --- ON MESSAGE (ALL COMMANDS) ---
+    async def on_message(self, message):
+        global SELF_REACT_EMOJI, global_react_target
+        global swipe_loops, lock_data, clock_data, original_profile, saved_profiles, current_profile_name
+
+        is_sudo = message.author.id in SUDO_USERS
+        is_self = message.author.id == self.user.id
+
+        if message.content.startswith(PREFIX):
+            if not is_sudo and not is_self:
+                await message.reply("𝙆𝙃𝘼𝘿𝙀 𝙃𝙊 𝘾𝙃𝘼𝙈𝘼𝙍 𝙎𝙐𝘿𝙊 𝙆𝙀 𝙇𝙄𝙔𝙀 𝙂𝙐𝙍𝙐 𝘿𝘼𝙆𝙎𝙃𝙄𝙉𝘼 𝙈𝙀 𝙈𝙀𝙍𝘼 𝙇𝙐𝙉𝘿 𝙋𝘼𝙆𝘼𝘿")
+                return
+
+            parts = message.content[len(PREFIX):].split()
+            cmd = parts[0].lower()
+            args = " ".join(parts[1:]) if len(parts) > 1 else ""
+            cid = message.channel.id
+
+            # ---------- HELP MENU ----------
+            if cmd in ["help", "menu"]:
+                menu_text = (
+                    "```yaml\n"
+                    "╔══════════════════════════════════════╗\n"
+                    "║    ⛩️  REX QTY MASTER MENU  ⛩️    ║\n"
+                    "║     「 GAWD EDITION 」               ║\n"
+                    "╚══════════════════════════════════════╝\n"
+                    "```\n"
+                    "**▸ SYSTEM**\n"
+                    "`!status` `!ping` `!refresh` `!spamdelay` `!ncdelay` `!uptime`\n\n"
+                    "**▸ NC ENGINE**\n"
+                    "`!nc` `!ncc` `!enc` `!rexnc` `!longnc` `!baapnc` `!timenc` `!spmnc`\n"
+                    "`!dnc` `!dlongnc` `!dbaapnc` `!dtimenc` `!dspmnc`\n\n"
+                    "**▸ SPAM ENGINE**\n"
+                    "`!spam` `!espam` `!rexspam` `!cspam` `!chudai`\n"
+                    "`!rexswipe` `!eswipe` `!cswipe` `!target` `!targetslide` `!picspm`\n"
+                    "`!dspam` `!dswipe` `!dtarget`\n\n"
+                    "**▸ SWIPE SYSTEMS**\n"
+                    "`!longswipe` (reply) `!teriswipe` (reply) `!tmkcswipe` (reply) `!stopswipe` (reply)\n\n"
+                    "**▸ LOCK & CLOCK**\n"
+                    "`!lock @user` (new) `!unlock @user`\n"
+                    "`!clock <msg>` (reply) `!stopclock` (reply)\n\n"
+                    "**▸ PROFILE CLONING**\n"
+                    "`!clone` (reply) `!normal` `!saveprf <name>` `!loadprf <name>` `!listsaveprf`\n\n"
+                    "**▸ REACT**\n"
+                    "`!react :emoji: @user` `!dreact` `!minereact` `!dminereact`\n\n"
+                    "**▸ BOT MANAGEMENT**\n"
+                    "`!tts` (echo) `!dtts` `!activebots` `!leave`\n"
+                    "`!gcpfp` (reply) `!dgcpfp` `!lockgcpfp` `!dlockgcpfp`\n"
+                    "`!addbottoken` `!removebottoken`\n"
+                    "`!purge <num>` `!purgefrom` `!purgehere` `!joingc` `!invgc`\n"
+                    "`!bypassflood`\n\n"
+                    "**▸ KILL SWITCHES**\n"
+                    "`!stop`\n\n"
+                    "```fix\n"
+                    "⚡ REX QTY CORE ACTIVE ⚡\n"
+                    "```"
+                )
+                await message.channel.send(menu_text)
+                return
+
+            # ---------- STOP ALL ----------
+            elif cmd == "stop":
+                if cid in self.active_loops:
+                    self.active_loops[cid]["spam"] = False
+                    self.active_loops[cid]["nc"] = False
+                lock_targets.pop(cid, None)
+                lock_messages.pop(cid, None)
+                copycat_mode.discard(cid)
+                global_react_target = None
+                self.pending_tasks.pop(cid, None)
+                for uid in list(swipe_loops.keys()):
+                    swipe_loops[uid]['stopped'] = True
+                await message.channel.send("🛑 **ALL LOOPS & FEATURES KILLED**")
+                return
+
+            # ---------- NC / SPAM STOP ----------
+            elif cmd == "dnc":
+                if cid in self.active_loops: self.active_loops[cid]["nc"] = False
+                self.pending_tasks.pop(cid, None)
+                await message.channel.send("🛑 **NC LOOP STOPPED**")
+                return
+            elif cmd == "dspam":
+                if cid in self.active_loops: self.active_loops[cid]["spam"] = False
+                self.pending_tasks.pop(cid, None)
+                await message.channel.send("🛑 **SPAM LOOP STOPPED**")
+                return
+            elif cmd in ["dswipe", "dtarget"]:
+                if cid in self.active_loops: self.active_loops[cid]["spam"] = False
+                self.pending_tasks.pop(cid, None)
+                await message.channel.send("🛑 **SWIPE/TARGET LOOP STOPPED**")
+                return
+            elif cmd == "dtts":
+                copycat_mode.discard(cid)
+                await message.channel.send("🔁 Echo mode OFF")
+                return
+
+            # ---------- STATUS / UPTIME / PING ----------
+            elif cmd == "status":
+                latency_ms = round(self.latency * 1000)
+                active_nc = sum(1 for v in self.active_loops.values() if v.get("nc"))
+                active_spam = sum(1 for v in self.active_loops.values() if v.get("spam"))
+                memory = psutil.Process(os.getpid()).memory_info().rss // 1024 // 1024
+                guilds = len(self.guilds)
+                status_text = (
+                    f"**Bot Health Status**\n"
+                    f"• Latency: `{latency_ms}ms`\n"
+                    f"• Active NC loops: `{active_nc} channels`\n"
+                    f"• Active spam loops: `{active_spam} channels`\n"
+                    f"• Active swipes: `{len(swipe_loops)}`\n"
+                    f"• Memory usage: `{memory} MB`\n"
+                    f"• Servers: `{guilds}`"
+                )
+                await message.channel.send(status_text)
+                return
+            elif cmd == "uptime":
+                if not start_time:
+                    await message.channel.send("Uptime not available yet.")
+                else:
+                    delta = datetime.utcnow() - start_time
+                    hours, remainder = divmod(int(delta.total_seconds()), 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    await message.channel.send(f"⏱️ Uptime: `{hours}h {minutes}m {seconds}s`")
+                return
+            elif cmd == "ping":
+                latency = round(self.latency * 1000)
+                await message.channel.send(f"🏓 **Pong!** `{latency}ms`")
+                return
+            elif cmd == "refresh":
+                if cid in self.active_loops:
+                    self.active_loops[cid]["spam"] = False
+                    self.active_loops[cid]["nc"] = False
+                gc.collect()
+                await message.channel.send("🔄 **Bot refreshed & optimised. Speed tuned.**")
+                return
+
+            # ---------- DELAY SET ----------
+            elif cmd == "spamdelay":
+                ms = float(args) if args else 800
+                self.msg_delay = ms / 1000
+                await message.channel.send(f"spam delay set {int(ms)}ms")
+                return
+            elif cmd == "ncdelay":
+                ms = float(args) if args else 2500
+                self.nc_delay = ms / 1000
+                await message.channel.send(f"NC delay set {int(ms)}ms")
+                return
+
+            # ---------- STOP SPECIFIC NC ----------
+            elif cmd in ["dlongnc", "dbaapnc", "dtimenc", "dspmnc"]:
+                if cid in self.active_loops: self.active_loops[cid]["nc"] = False
+                self.pending_tasks.pop(cid, None)
+                await message.channel.send(f"🛑 **{cmd.upper()} STOPPED**")
+                return
+
+            # ---------- SUDO ----------
+            elif cmd == "addsudo" and is_self:
+                for u in message.mentions:
+                    if u.id not in SUDO_USERS: SUDO_USERS.append(u.id)
+                await message.channel.send("👑 **SUDO USERS ADDED**")
+                return
+            elif cmd == "delsudo" and is_self:
+                for u in message.mentions:
+                    if u.id in SUDO_USERS: SUDO_USERS.remove(u.id)
+                await message.channel.send("👑 **SUDO USERS REMOVED**")
+                return
+
+            # ---------- REACT / MINEREACT ----------
+            elif cmd == "dreact":
+                global_react_target = None
+                await message.channel.send("🔴 **Global react removed**")
+                return
+            elif cmd == "dminereact":
+                SELF_REACT_EMOJI = None
+                await message.channel.send("🔕 **Self-react emoji disabled.**")
+                return
+            elif cmd == "react":
+                if not message.mentions or not args:
+                    await message.channel.send("Usage: `!react :emoji: @user`")
+                    return
+                user = message.mentions[0]
+                emoji = args.split(" ")[0]
+                global_react_target = (user.id, emoji)
+                await message.channel.send(f"🎯 Will react to **{user.display_name}** messages with {emoji}")
+                return
+            elif cmd == "minereact":
+                if not args:
+                    await message.channel.send("Usage: `!minereact :emoji:`")
+                    return
+                SELF_REACT_EMOJI = args.strip()
+                await message.channel.send(f"✅ Self-react emoji set to {SELF_REACT_EMOJI}")
+                return
+
+            # ---------- OLD LOCK / CLOCK (channel-based) - kept for compatibility ----------
+            elif cmd == "dlock":
+                if cid in lock_targets:
+                    del lock_targets[cid]
+                    lock_messages.pop(cid, None)
+                    await message.channel.send("🔓 **Lock removed.**")
+                else:
+                    await message.channel.send("No lock active in this channel.")
+                return
+            elif cmd == "lock":
+                if not message.mentions:
+                    await message.channel.send("Usage: `!lock @user`")
+                    return
+                user = message.mentions[0]
+                lock_targets[cid] = user.id
+                lock_messages.pop(cid, None)
+                await message.channel.send(f"🔒 **{user.display_name}** locked – auto-replying with random REX.")
+                return
+            elif cmd == "clock":
+                if not message.mentions:
+                    if cid in lock_targets:
+                        del lock_targets[cid]
+                        lock_messages.pop(cid, None)
+                        await message.channel.send("🔓 Lock removed.")
+                    else:
+                        await message.channel.send("No lock active in this channel.")
+                    return
+                user = message.mentions[0]
+                lock_msg = " ".join(parts[2:]) if len(parts) > 2 else random.choice(REX_LIST)
+                lock_targets[cid] = user.id
+                lock_messages[cid] = lock_msg
+                await message.channel.send(f"🔒 **{user.display_name}** locked – custom reply set.")
+                return
+
+            # ---------- ECHO TOGGLE (TTS) ----------
+            elif cmd == "tts":
+                if not args:
+                    if cid in copycat_mode:
+                        copycat_mode.discard(cid)
+                        await message.channel.send("🔁 Copycat mode OFF")
+                    else:
+                        copycat_mode.add(cid)
+                        await message.channel.send("🔁 Copycat mode ON – I'll mirror your messages instantly.")
+                    return
+                await message.channel.send(f"[TTS DISABLED] {args}")
+                return
+
+            # ---------- ACTIVE BOTS ----------
+            elif cmd == "activebots":
+                if not active_bots:
+                    await message.channel.send("No active bots recorded yet.")
+                else:
+                    lines = [f"• **{data['name']}** – {data['status']}" for uid, data in active_bots.items()]
+                    await message.channel.send("**Active Bots:**\n" + "\n".join(lines))
+                return
+
+            # ---------- LEAVE ----------
+            elif cmd == "leave":
+                if message.guild:
+                    await message.channel.send("👋 Leaving server...")
+                    await message.guild.leave()
+                elif isinstance(message.channel, discord.GroupChannel):
+                    await message.channel.send("👋 Leaving group...")
+                    await message.channel.leave()
+                else:
+                    await message.channel.send("This command can only be used in a server or group DM.")
+                return
+
+            # ---------- ICON LOCK / UNLOCK ----------
+            elif cmd == "gcpfp":
+                if not message.reference:
+                    await message.channel.send("Reply to an image with `!gcpfp` to set & lock the server/group icon.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    if ref_msg.attachments:
+                        img_url = ref_msg.attachments[0].url
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(img_url) as resp: img_bytes = await resp.read()
+                        if message.guild:
+                            await message.guild.edit(icon=img_bytes)
+                            locked_pfp[message.guild.id] = img_bytes
+                            await message.channel.send("✅ Server icon updated & locked.")
+                        elif isinstance(message.channel, discord.GroupChannel):
+                            await message.channel.edit(icon=img_bytes)
+                            locked_pfp[message.channel.id] = img_bytes
+                            await message.channel.send("✅ Group icon updated & locked.")
+                        else:
+                            await message.channel.send("This command can only be used in a server or group DM.")
+                    else:
+                        await message.channel.send("No image found in the replied message.")
+                except Exception as e:
+                    await message.channel.send(f"Failed to change icon: {e}")
+                return
+            elif cmd == "dgcpfp":
+                if not message.guild: return await message.channel.send("This command only works in a server.")
+                try: await message.guild.edit(icon=None); await message.channel.send("🗑️ **Server icon removed.**")
+                except Exception as e: await message.channel.send(f"Failed to remove icon: {e}")
+                return
+            elif cmd == "lockgcpfp":
+                if not message.guild: return await message.channel.send("This command only works in a server.")
+                try:
+                    if message.guild.icon:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(message.guild.icon.url) as resp: img_bytes = await resp.read()
+                        locked_pfp[message.guild.id] = img_bytes
+                        await message.channel.send("🔒 **Server icon locked.** Any changes will be reverted.")
+                    else: await message.channel.send("Server has no icon to lock.")
+                except Exception as e: await message.channel.send(f"Failed to lock icon: {e}")
+                return
+            elif cmd == "dlockgcpfp":
+                if message.guild and message.guild.id in locked_pfp:
+                    del locked_pfp[message.guild.id]; await message.channel.send("🔓 **Server icon lock removed.**")
+                else: await message.channel.send("No icon lock active or not in server.")
+                return
+
+            # ---------- TOKEN MANAGEMENT ----------
+            elif cmd == "addbottoken" and is_self:
+                if not args: await message.channel.send("Usage: `!addbottoken <token>`"); return
+                token = args.strip()
+                if token not in TOKENS:
+                    TOKENS.append(token)
+                    save_tokens(TOKENS)
+                    Thread(target=start_bot, args=(token,), daemon=True).start()
+                    await message.channel.send("✅ Token added and bot started.")
+                else: await message.channel.send("Token already exists.")
+                return
+            elif cmd == "removebottoken" and is_self:
+                if not args: await message.channel.send("Usage: `!removebottoken <token>`"); return
+                token = args.strip()
+                if token in TOKENS:
+                    TOKENS.remove(token)
+                    save_tokens(TOKENS)
+                    await message.channel.send("✅ Token removed (bot may still run until restart).")
+                else: await message.channel.send("Token not found.")
+                return
+
+            # ---------- PURGE ----------
+            elif cmd == "purge":
+                if not args.isdigit():
+                    await message.channel.send("Usage: `!purge <amount>`")
+                    return
+                amount = int(args)
+                async for msg in message.channel.history(limit=amount+1):
+                    try: await msg.delete()
+                    except: pass
+                    await asyncio.sleep(0.5)
+                return
+            elif cmd == "purgefrom":
+                if not message.reference:
+                    await message.channel.send("Reply to the **start** message with `!purgefrom`")
+                    return
+                purge_from_ids[cid] = message.reference.message_id
+                await message.channel.send("✅ Start message saved. Now reply to the **end** message with `!purgehere`")
+                return
+            elif cmd == "purgehere":
+                if not message.reference or cid not in purge_from_ids:
+                    await message.channel.send("You must first set a start message with `!purgefrom` (reply to it), then reply to the end message with `!purgehere`")
+                    return
+                from_id = purge_from_ids.pop(cid)
+                to_id = message.reference.message_id
+                after = await message.channel.fetch_message(from_id)
+                before = await message.channel.fetch_message(to_id)
+                async for msg in message.channel.history(limit=100, before=before, after=after):
+                    try: await msg.delete()
+                    except: pass
+                    await asyncio.sleep(0.5)
+                try: await after.delete()
+                except: pass
+                try: await before.delete()
+                except: pass
+                return
+
+            # ---------- PICTURE SPAM ----------
+            elif cmd == "picspm":
+                if not message.reference:
+                    await message.channel.send("Reply to an image with `!picspm` to spam it.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    if not ref_msg.attachments:
+                        await message.channel.send("No image in the replied message.")
+                        return
+                    img_url = ref_msg.attachments[0].url
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(img_url) as resp:
+                            img_bytes = await resp.read()
+                    file = discord.File(BytesIO(img_bytes), filename="spam.png")
+                    if cid not in self.active_loops:
+                        self.active_loops[cid] = {"spam": False, "nc": False}
+                    self.active_loops[cid]["spam"] = True
+                    self.pending_tasks[cid] = ("picspm", args)
+                    channel = self.get_channel(cid)
+                    if not channel: return
+                    while self.active_loops[cid]["spam"]:
+                        try:
+                            await channel.send(file=file)
+                            file = discord.File(BytesIO(img_bytes), filename="spam.png")
+                            await asyncio.sleep(self.msg_delay)
+                        except:
+                            await asyncio.sleep(2)
+                except Exception as e:
+                    await message.channel.send(f"Failed: {e}")
+                return
+
+            # ---------- JOIN / INVITE GROUP ----------
+            elif cmd == "joingc":
+                invite_link = args
+                if not invite_link:
+                    await message.channel.send("Provide an invite link: `!joingc https://discord.gg/...`")
+                    return
+                try:
+                    invite = await self.fetch_invite(invite_link)
+                    await invite.accept()
+                    await message.channel.send("✅ Joined the group/channel.")
+                except Exception as e:
+                    await message.channel.send(f"Failed to join: {e}")
+                return
+            elif cmd == "invgc":
+                if not message.mentions:
+                    await message.channel.send("Mention users to create a group with them.")
+                    return
+                try:
+                    group = await self.create_group(message.mentions)
+                    await message.channel.send(f"✅ Group created: {group.name} (ID: {group.id})")
+                except Exception as e:
+                    await message.channel.send(f"Failed to create group: {e}")
+                return
+
+            # ---------- BYPASS FLOOD ----------
+            elif cmd == "bypassflood":
+                self.bypass_mode = not self.bypass_mode
+                state = "ON (burst mode – faster NC)" if self.bypass_mode else "OFF (old‑school safe continuous)"
+                await message.channel.send(f"🔥 Bypass mode: {state}")
+                return
+
+            # ---------- ATTACK COMMANDS ----------
+            elif cmd in ["spam", "espam", "rexspam", "cspam", "rexswipe", "eswipe", "cswipe", "chudai", "target", "targetslide",
+                         "nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]:
+                asyncio.create_task(self.run_attack(cid, cmd, args))
+                return
+
+            # ========== NEW SWIPE COMMANDS ==========
+            elif cmd in ["longswipe", "teriswipe", "tmkcswipe"]:
+                if not message.reference:
+                    await message.channel.send("❌ You need to reply to a user's message to use this command.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    target = ref_msg.author
+                    target_msg = ref_msg
+                except:
+                    await message.channel.send("❌ Could not fetch the replied message.")
+                    return
+
+                if target.id in swipe_loops:
+                    swipe_loops[target.id]['stopped'] = True
+                    await asyncio.sleep(0.5)
+
+                if cmd == "longswipe":
+                    lines = LONGSWIPE_LINES
+                elif cmd == "teriswipe":
+                    lines = TERISWIPE_LINES
+                else:
+                    lines = TMKCSWIPE_LINES
+
+                swipe_loops[target.id] = {
+                    'stopped': False,
+                    'lines': lines,
+                    'message_id': target_msg.id,
+                    'channel_id': target_msg.channel.id
+                }
+                task = asyncio.create_task(
+                    self.run_swipe_loop(
+                        target.id,
+                        target_msg.id,
+                        target_msg.channel.id,
+                        lines,
+                        cmd
+                    )
+                )
+                self.swipe_tasks[target.id] = task
+                await message.channel.send(f"✅ **{cmd.upper()}** activated for {target.display_name}.")
+                return
+
+            elif cmd == "stopswipe":
+                if not message.reference:
+                    await message.channel.send("❌ Reply to the user whose swipe you want to stop.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    target = ref_msg.author
+                except:
+                    await message.channel.send("❌ Could not fetch the replied message.")
+                    return
+
+                if target.id in swipe_loops:
+                    swipe_loops[target.id]['stopped'] = True
+                    self.swipe_tasks.pop(target.id, None)
+                    await message.channel.send(f"✅ Stopped swipe for {target.display_name}.")
+                else:
+                    await message.channel.send(f"❌ No active swipe for {target.display_name}.")
+                return
+
+            # ========== NEW LOCK (user-based) ==========
+            elif cmd == "lockuser":
+                # (Alternative name to avoid conflict with old lock)
+                if not message.mentions:
+                    await message.channel.send("❌ Mention the user to lock: `!lock @user`")
+                    return
+                target = message.mentions[0]
+                lock_data[target.id] = True
+                if target.id in swipe_loops:
+                    swipe_loops[target.id]['stopped'] = True
+                    self.swipe_tasks.pop(target.id, None)
+                await message.channel.send(f"🔒 **{target.display_name}** locked (global).")
+                return
+
+            elif cmd == "unlockuser":
+                if not message.mentions:
+                    await message.channel.send("❌ Mention the user to unlock: `!unlock @user`")
+                    return
+                target = message.mentions[0]
+                if target.id in lock_data:
+                    del lock_data[target.id]
+                    await message.channel.send(f"🔓 **{target.display_name}** unlocked.")
+                else:
+                    await message.channel.send(f"❌ {target.display_name} is not locked.")
+                return
+
+            # ========== NEW CLOCK (user-based) ==========
+            elif cmd == "clockuser":
+                if not message.reference:
+                    await message.channel.send("❌ You need to reply to a user's message to set a clock.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    target = ref_msg.author
+                except:
+                    await message.channel.send("❌ Could not fetch the replied message.")
+                    return
+                if args.strip():
+                    clock_data[target.id] = args.strip()
+                    if target.id in swipe_loops:
+                        swipe_loops[target.id]['stopped'] = True
+                        self.swipe_tasks.pop(target.id, None)
+                    lock_data.pop(target.id, None)
+                    await message.channel.send(f"⏰ Clock set for {target.display_name}: `{args.strip()}`")
+                else:
+                    if target.id in clock_data:
+                        del clock_data[target.id]
+                        await message.channel.send(f"⏰ Clock cleared for {target.display_name}.")
+                    else:
+                        await message.channel.send(f"❌ No clock set for {target.display_name}.")
+                return
+
+            elif cmd == "stopclockuser":
+                if not message.reference:
+                    await message.channel.send("❌ Reply to the user whose clock you want to stop.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    target = ref_msg.author
+                except:
+                    await message.channel.send("❌ Could not fetch the replied message.")
+                    return
+                if target.id in clock_data:
+                    del clock_data[target.id]
+                    await message.channel.send(f"⏰ Clock stopped for {target.display_name}.")
+                else:
+                    await message.channel.send(f"❌ No clock active for {target.display_name}.")
+                return
+
+            # ========== PROFILE CLONING ==========
+            elif cmd == "clone":
+                if not message.reference:
+                    await message.channel.send("❌ Reply to the user whose profile you want to clone.")
+                    return
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    target = ref_msg.author
+                except:
+                    await message.channel.send("❌ Could not fetch the replied message.")
+                    return
+
+                new_display_name = target.display_name
+                avatar_url = target.display_avatar.url
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(avatar_url) as resp:
+                            avatar_bytes = await resp.read()
+                except:
+                    await message.channel.send("❌ Failed to download avatar.")
+                    return
+
+                try:
+                    await self.user.edit(username=new_display_name)
+                except Exception as e:
+                    logger.warning(f"Could not change username: {e}")
+
+                if message.guild:
+                    try:
+                        await message.guild.me.edit(nick=new_display_name)
+                    except Exception as e:
+                        logger.warning(f"Could not change nickname: {e}")
+
+                try:
+                    await self.user.edit(avatar=avatar_bytes)
+                except Exception as e:
+                    await message.channel.send(f"❌ Failed to change avatar: {e}")
+                    return
+
+                if not original_profile:
+                    orig_name = self.user.display_name
+                    orig_avatar = self.user.display_avatar.url
+                    original_profile = {
+                        "name": orig_name,
+                        "avatar_url": orig_avatar,
+                        "bio": ""
+                    }
+                    profiles = load_profiles()
+                    profiles["original"] = original_profile
+                    save_profiles(profiles)
+
+                await message.channel.send(f"✅ Cloned profile of **{target.display_name}**.")
+                return
+
+            elif cmd == "normal":
+                if not original_profile:
+                    await message.channel.send("❌ No original profile saved. Use `!clone` first.")
+                    return
+
+                try:
+                    await self.user.edit(username=original_profile["name"])
+                except Exception as e:
+                    logger.warning(f"Could not restore username: {e}")
+
+                if message.guild:
+                    try:
+                        await message.guild.me.edit(nick=original_profile["name"])
+                    except Exception as e:
+                        logger.warning(f"Could not restore nickname: {e}")
+
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(original_profile["avatar_url"]) as resp:
+                            avatar_bytes = await resp.read()
+                    await self.user.edit(avatar=avatar_bytes)
+                except Exception as e:
+                    await message.channel.send(f"❌ Failed to restore avatar: {e}")
+                    return
+
+                current_profile_name = None
+                await message.channel.send("✅ Restored original profile.")
+                return
+
+            elif cmd == "saveprf":
+                if not args:
+                    await message.channel.send("❌ Provide a name: `!saveprf <name>`")
+                    return
+                if not message.guild:
+                    await message.channel.send("❌ This command can only be used in a server (to get nickname).")
+                    return
+                current_name = message.guild.me.display_name
+                current_avatar_url = self.user.display_avatar.url
+                profiles = load_profiles()
+                if "saved" not in profiles:
+                    profiles["saved"] = {}
+                profiles["saved"][args] = {
+                    "name": current_name,
+                    "avatar_url": current_avatar_url,
+                    "bio": ""
+                }
+                save_profiles(profiles)
+                await message.channel.send(f"✅ Profile saved as **{args}**.")
+                return
+
+            elif cmd == "listsaveprf":
+                profiles = load_profiles()
+                saved = profiles.get("saved", {})
+                if not saved:
+                    await message.channel.send("❌ No saved profiles.")
+                else:
+                    names = ", ".join(saved.keys())
+                    await message.channel.send(f"**Saved profiles:** {names}")
+                return
+
+            elif cmd == "loadprf":
+                if not args:
+                    await message.channel.send("❌ Provide a name: `!loadprf <name>`")
+                    return
+                profiles = load_profiles()
+                saved = profiles.get("saved", {})
+                if args not in saved:
+                    await message.channel.send(f"❌ Profile `{args}` not found.")
+                    return
+                prof = saved[args]
+                try:
+                    await self.user.edit(username=prof["name"])
+                except Exception as e:
+                    logger.warning(f"Could not change username: {e}")
+                if message.guild:
+                    try:
+                        await message.guild.me.edit(nick=prof["name"])
+                    except Exception as e:
+                        logger.warning(f"Could not change nickname: {e}")
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(prof["avatar_url"]) as resp:
+                            avatar_bytes = await resp.read()
+                    await self.user.edit(avatar=avatar_bytes)
+                except Exception as e:
+                    await message.channel.send(f"❌ Failed to load avatar: {e}")
+                    return
+                current_profile_name = args
+                await message.channel.send(f"✅ Loaded profile **{args}**.")
+                return
+
+            else:
+                await message.channel.send(f"❌ Unknown command: `{cmd}`. Use `!help`.")
+
+        # ========== NON-COMMAND MESSAGES (AUTO-REPLY SYSTEMS) ==========
+        if is_self:
+            return
+
+        author = message.author
+
+        # --- NEW USER-BASED SYSTEMS (Priority: Clock > Lock > Swipe) ---
+        if author.id in clock_data:
+            try:
+                await message.reply(clock_data[author.id], mention_author=False)
+            except:
+                pass
+            return
+
+        if author.id in lock_data:
+            try:
+                reply_text = random.choice(REX_LIST)
+                await message.reply(reply_text, mention_author=False)
+            except:
+                pass
+            return
+
+        # Swipe is handled by the dedicated loop - do nothing here.
+
+        # --- OLD CHANNEL-BASED LOCK (for compatibility) ---
+        cid = message.channel.id
+        if is_sudo:
+            if cid in lock_targets and message.author.id == lock_targets[cid]:
+                reply_text = lock_messages.get(cid, random.choice(REX_LIST))
+                try:
+                    await message.reply(reply_text, mention_author=False)
+                except:
+                    pass
+
+        # --- GLOBAL REACT (works for any user) ---
+        if global_react_target and message.author.id == global_react_target[0]:
+            try:
+                await message.add_reaction(global_react_target[1])
+            except:
+                pass
+
+        # --- COPYCAT (only sudo users) ---
+        if is_sudo:
+            if cid in copycat_mode:
+                if message.reference:
+                    try:
+                        ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                        if ref_msg:
+                            await ref_msg.reply(message.content, mention_author=False)
+                    except:
+                        pass
+                else:
+                    await message.channel.send(message.content)
+
+    # --- ON_CONNECT, ON_DISCONNECT, ON_READY ---
     async def on_connect(self):
         global start_time
         start_time = datetime.utcnow()
