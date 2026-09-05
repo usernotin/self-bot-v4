@@ -65,9 +65,7 @@ def save_tokens(tokens):
         except:
             pass
 
-# Load initial tokens
 load_tokens()
-
 if not TOKENS:
     logger.error("⚠ No tokens found! Set TOKENS environment variable.")
 
@@ -116,7 +114,7 @@ def load_profiles():
 def save_profiles(profiles):
     save_json(PROFILES_FILE, profiles)
 
-# --- SWIPE LISTS (unchanged, full lists) ---
+# --- SWIPE LISTS (unchanged) ---
 LONGSWIPE_LINES = [
     "Teri kutia ma ki tang kaat ke usse danda banaunga fir ussi danda se teri ma ki chut mein daal dunga itni zor se uska pet phat jayega 🤣🤸🏿‍♀️",
     "Teri ma ki zubaan kaat ke usse strap banaunga fir ussi strap se teri ma ki chut band kar dunga 🧤",
@@ -293,9 +291,9 @@ TMKCSWIPE_LINES = [
 ]
 
 # --- GLOBALS ---
-swipe_loops = {}  # user_id -> {'stopped': False, 'lines': list, 'message_id': int, 'channel_id': int, 'type': str}
-lock_data = {}    # user_id -> True
-clock_data = {}   # user_id -> custom_message
+swipe_loops = {}
+lock_data = {}
+clock_data = {}
 
 original_profile = {}
 saved_profiles = {}
@@ -312,7 +310,6 @@ global_react_target = None
 copycat_mode = set()
 purge_from_ids = {}
 
-# --- REX LISTS (unchanged) ---
 REX_LIST = [
     "चुदाई Kha 😂❤️", "उठक बैठक लगा 😏🔥", "तेरी माँ चोदू 😍😍", "ओय कमजोर 🤢🤢", 
     "लंड चूस 🥱🤍➿", "पिल्लै 🐕‍", "😱 arey 😉 ye 🤡 kaise 😋 kiya 😏 re 😁 teri 😊 maa 😍 randy 😭100% 😂",
@@ -406,10 +403,8 @@ class RexMasterBot(discord.Client):
         self.bypass_mode = True
         self.pending_tasks = {}
         self.swipe_tasks = {}
-        self.bot_index = len(active_bots) + 1
 
     async def run_swipe_loop(self, target_user_id, message_id, channel_id, lines, swipe_type):
-        """Continuous swipe loop on a specific message."""
         index = 0
         channel = self.get_channel(channel_id)
         if not channel:
@@ -441,7 +436,6 @@ class RexMasterBot(discord.Client):
                 logger.error(f"Swipe loop error: {e}")
                 await asyncio.sleep(1)
 
-        # Cleanup and save
         swipe_loops.pop(target_user_id, None)
         save_data()
 
@@ -531,7 +525,7 @@ class RexMasterBot(discord.Client):
             args = " ".join(parts[1:]) if len(parts) > 1 else ""
             cid = message.channel.id
 
-            # ---------- HELP MENU ----------
+            # ---------- HELP ----------
             if cmd in ["help", "menu"]:
                 menu_text = (
                     "```yaml\n"
@@ -610,7 +604,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send("🔁 Echo mode OFF")
                 return
 
-            # ---------- STATUS / UPTIME / PING ----------
+            # ---------- STATUS ----------
             elif cmd == "status":
                 latency_ms = round(self.latency * 1000)
                 active_nc = sum(1 for v in self.active_loops.values() if v.get("nc"))
@@ -649,7 +643,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send("🔄 **Bot refreshed & optimised. Speed tuned.**")
                 return
 
-            # ---------- DELAY SET ----------
+            # ---------- DELAY ----------
             elif cmd == "spamdelay":
                 ms = float(args) if args else 800
                 self.msg_delay = ms / 1000
@@ -680,7 +674,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send("👑 **SUDO USERS REMOVED**")
                 return
 
-            # ---------- REACT / MINEREACT ----------
+            # ---------- REACT ----------
             elif cmd == "dreact":
                 global_react_target = None
                 await message.channel.send("🔴 **Global react removed**")
@@ -706,7 +700,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send(f"✅ Self-react emoji set to {SELF_REACT_EMOJI}")
                 return
 
-            # ---------- OLD LOCK / CLOCK (channel-based) ----------
+            # ---------- OLD LOCK / CLOCK ----------
             elif cmd == "dlock":
                 if cid in lock_targets:
                     del lock_targets[cid]
@@ -740,7 +734,7 @@ class RexMasterBot(discord.Client):
                 await message.channel.send(f"🔒 **{user.display_name}** locked – custom reply set.")
                 return
 
-            # ---------- ECHO TOGGLE (TTS) ----------
+            # ---------- ECHO ----------
             elif cmd == "tts":
                 if not args:
                     if cid in copycat_mode:
@@ -774,7 +768,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("This command can only be used in a server or group DM.")
                 return
 
-            # ---------- ICON LOCK / UNLOCK ----------
+            # ---------- ICON LOCK ----------
             elif cmd == "gcpfp":
                 if not message.reference:
                     await message.channel.send("Reply to an image with `!gcpfp` to set & lock the server/group icon.")
@@ -837,7 +831,6 @@ class RexMasterBot(discord.Client):
                 Thread(target=start_bot, args=(token,), daemon=True).start()
                 await message.channel.send("✅ Token added and bot started.")
                 return
-
             elif cmd == "removebottoken" and is_self:
                 if not args:
                     await message.channel.send("Usage: `!removebottoken <token>`")
@@ -920,7 +913,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send(f"Failed: {e}")
                 return
 
-            # ---------- JOIN / INVITE GROUP ----------
+            # ---------- JOIN / INVITE ----------
             elif cmd == "joingc":
                 invite_link = args
                 if not invite_link:
@@ -970,7 +963,6 @@ class RexMasterBot(discord.Client):
                 save_data()
                 await message.channel.send(f"🔒 **{target.display_name}** locked globally (REX replies).")
                 return
-
             elif cmd == "unlockuser":
                 if not message.mentions:
                     await message.channel.send("❌ Mention the user: `!unlockuser @user`")
@@ -983,7 +975,6 @@ class RexMasterBot(discord.Client):
                 else:
                     await message.channel.send(f"❌ {target.display_name} is not locked.")
                 return
-
             elif cmd == "clockuser":
                 if not message.reference:
                     await message.channel.send("❌ You need to reply to a user's message to set a clock.")
@@ -1010,7 +1001,6 @@ class RexMasterBot(discord.Client):
                     else:
                         await message.channel.send(f"❌ No clock set for {target.display_name}.")
                 return
-
             elif cmd == "stopclockuser":
                 if not message.reference:
                     await message.channel.send("❌ Reply to the user whose clock you want to stop.")
@@ -1073,7 +1063,6 @@ class RexMasterBot(discord.Client):
                 self.swipe_tasks[target.id] = task
                 await message.channel.send(f"✅ **{cmd.upper()}** activated for {target.display_name}.")
                 return
-
             elif cmd == "stopswipe":
                 if not message.reference:
                     await message.channel.send("❌ Reply to the user whose swipe you want to stop.")
@@ -1084,7 +1073,6 @@ class RexMasterBot(discord.Client):
                 except:
                     await message.channel.send("❌ Could not fetch the replied message.")
                     return
-
                 if target.id in swipe_loops:
                     swipe_loops[target.id]['stopped'] = True
                     self.swipe_tasks.pop(target.id, None)
@@ -1106,13 +1094,12 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Could not fetch the replied message.")
                     return
 
-                # Get display name (nickname or global name)
-                new_display_name = target.display_name
-                # Get avatar URL
+                # Get display name (nickname in guild, or global name)
+                display_name = target.display_name
                 avatar_url = target.display_avatar.url
-                # Try to get bio (about me) - may not always work
                 bio = getattr(target, "bio", "")
 
+                # Download avatar
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(avatar_url) as resp:
@@ -1121,27 +1108,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Failed to download avatar.")
                     return
 
-                # Change global username (this changes the visible name)
-                try:
-                    await self.user.edit(username=new_display_name)
-                except Exception as e:
-                    logger.warning(f"Could not change username: {e}")
-
-                # Change nickname in current guild
-                if message.guild:
-                    try:
-                        await message.guild.me.edit(nick=new_display_name)
-                    except Exception as e:
-                        logger.warning(f"Could not change nickname: {e}")
-
-                # Change avatar
-                try:
-                    await self.user.edit(avatar=avatar_bytes)
-                except Exception as e:
-                    await message.channel.send(f"❌ Failed to change avatar: {e}")
-                    return
-
-                # Store original profile if not already
+                # Store original profile if not saved
                 if not original_profile:
                     orig_name = self.user.display_name
                     orig_avatar = self.user.display_avatar.url
@@ -1155,8 +1122,50 @@ class RexMasterBot(discord.Client):
                     profiles["original"] = original_profile
                     save_profiles(profiles)
 
-                # Also store the cloned profile for future use? Not automatically.
-                await message.channel.send(f"✅ Cloned profile of **{target.display_name}** (display name, avatar, bio).")
+                # === CHANGE NICKNAME IN GUILD (priority) ===
+                if message.guild:
+                    try:
+                        await message.guild.me.edit(nick=display_name)
+                        nickname_changed = True
+                    except Exception as e:
+                        nickname_changed = False
+                        logger.warning(f"Could not change nickname: {e}")
+                else:
+                    nickname_changed = False
+
+                # === CHANGE GLOBAL USERNAME (fallback) ===
+                # Note: Discord limits username changes to a few times per hour.
+                try:
+                    await self.user.edit(username=display_name)
+                    username_changed = True
+                except Exception as e:
+                    username_changed = False
+                    logger.warning(f"Could not change username: {e}")
+
+                # === CHANGE AVATAR ===
+                try:
+                    await self.user.edit(avatar=avatar_bytes)
+                    avatar_changed = True
+                except Exception as e:
+                    avatar_changed = False
+                    await message.channel.send(f"❌ Failed to change avatar: {e}")
+                    return
+
+                # Prepare response message
+                changes = []
+                if nickname_changed:
+                    changes.append("nickname")
+                if username_changed:
+                    changes.append("global username")
+                if avatar_changed:
+                    changes.append("avatar")
+                if bio:
+                    changes.append("bio (attempted)")
+
+                if changes:
+                    await message.channel.send(f"✅ Cloned profile of **{target.display_name}** (changed: {', '.join(changes)}).")
+                else:
+                    await message.channel.send("⚠️ Could not change any profile fields (maybe permission issues).")
                 return
 
             elif cmd == "normal":
@@ -1164,17 +1173,16 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ No original profile saved. Use `!clone` first.")
                     return
 
+                # Restore original
                 try:
                     await self.user.edit(username=original_profile["name"])
                 except Exception as e:
                     logger.warning(f"Could not restore username: {e}")
-
                 if message.guild:
                     try:
                         await message.guild.me.edit(nick=original_profile["name"])
                     except Exception as e:
                         logger.warning(f"Could not restore nickname: {e}")
-
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(original_profile["avatar_url"]) as resp:
@@ -1183,7 +1191,6 @@ class RexMasterBot(discord.Client):
                 except Exception as e:
                     await message.channel.send(f"❌ Failed to restore avatar: {e}")
                     return
-
                 current_profile_name = None
                 await message.channel.send("✅ Restored original profile.")
                 return
@@ -1216,7 +1223,6 @@ class RexMasterBot(discord.Client):
                 if not saved:
                     await message.channel.send("❌ No saved profiles.")
                     return
-                # Numbered list
                 lines = []
                 for idx, (name, data) in enumerate(saved.items(), 1):
                     lines.append(f"{idx}) **{name}**")
@@ -1233,7 +1239,6 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ No saved profiles.")
                     return
 
-                # Check if arg is a number
                 target_name = None
                 if args.isdigit():
                     idx = int(args) - 1
@@ -1250,6 +1255,7 @@ class RexMasterBot(discord.Client):
                         return
 
                 prof = saved[target_name]
+                # Apply
                 try:
                     await self.user.edit(username=prof["name"])
                 except Exception as e:
@@ -1281,7 +1287,7 @@ class RexMasterBot(discord.Client):
         author = message.author
         cid = message.channel.id
 
-        # --- USER-BASED LOCK (global) ---
+        # --- USER-BASED LOCK ---
         if author.id in lock_data:
             try:
                 reply_text = random.choice(REX_LIST)
@@ -1290,7 +1296,7 @@ class RexMasterBot(discord.Client):
                 pass
             return
 
-        # --- CLOCK (global) ---
+        # --- CLOCK ---
         if author.id in clock_data:
             try:
                 await message.reply(clock_data[author.id], mention_author=False)
@@ -1344,7 +1350,7 @@ class RexMasterBot(discord.Client):
         logger.info(f"✅ Connected to {len(self.guilds)} servers")
         active_bots[self.user.id] = {"name": str(self.user), "status": "online"}
 
-        # --- AUTO-RESUME: restore saved swipe loops, locks, clocks ---
+        # --- AUTO-RESUME ---
         data = load_data()
         if data:
             global swipe_loops, lock_data, clock_data
@@ -1353,18 +1359,15 @@ class RexMasterBot(discord.Client):
             clock_data = data.get("clock_data", {})
             logger.info(f"🔄 Restored {len(swipe_loops)} swipes, {len(lock_data)} locks, {len(clock_data)} clocks")
 
-            # Restart each swipe loop
             for user_id, sw in list(swipe_loops.items()):
                 if sw.get('stopped', False):
                     continue
-                # lines are stored, but we need to fetch the message
                 channel = self.get_channel(sw.get('channel_id'))
                 if not channel:
                     continue
                 try:
                     msg = await channel.fetch_message(sw.get('message_id'))
                     if msg:
-                        # Start the loop again
                         task = asyncio.create_task(
                             self.run_swipe_loop(
                                 int(user_id),
@@ -1379,7 +1382,6 @@ class RexMasterBot(discord.Client):
                 except:
                     pass
 
-        # Resume NC/Spam attacks
         for cid, (cmd, args) in list(self.pending_tasks.items()):
             asyncio.create_task(self.run_attack(cid, cmd, args))
 
@@ -1388,7 +1390,6 @@ class RexMasterBot(discord.Client):
             try: await after.edit(icon=locked_pfp[after.id])
             except: pass
 
-# ========== BOT STARTER FUNCTION ==========
 def start_bot(token):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -1404,7 +1405,6 @@ def start_bot(token):
             logger.error(f"❌ Bot error: {e}")
             time_module.sleep(5)
 
-# ========== MAIN ==========
 if __name__ == "__main__":
     Thread(target=run_web, daemon=True).start()
     logger.info("🌐 Flask server started")
