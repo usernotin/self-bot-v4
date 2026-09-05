@@ -7,7 +7,7 @@ import aiohttp
 import psutil
 import json
 from datetime import datetime, timezone, timedelta
-from threading import Thread
+from threading import Thread, Lock
 import time as time_module
 from io import BytesIO
 from flask import Flask
@@ -17,7 +17,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- KEEPALIVE SERVER (for Railway) ---
+# --- KEEPALIVE SERVER ---
 app = Flask('')
 @app.route('/')
 def home():
@@ -25,30 +25,64 @@ def home():
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
-# --- TOKENS FROM ENVIRONMENT ---
-TOKENS = os.environ.get("TOKENS", "").split(",")
-TOKENS = [t.strip() for t in TOKENS if t.strip() and "TOKEN" not in t]
+# --- TOKENS FROM ENVIRONMENT (Multiple Tokens) ---
+TOKENS = []
+TOKENS_LOCK = Lock()
 
-if not TOKENS:
-    try:
-        with open("tokens.json", "r") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                TOKENS = [t for t in data if t and "TOKEN" not in t]
-    except:
-        pass
+def load_tokens():
+    global TOKENS
+    with TOKENS_LOCK:
+        # First try environment variable
+        env_tokens = os.environ.get("TOKENS", "").split(",")
+        env_tokens = [t.strip() for t in env_tokens if t.strip() and "TOKEN" not in t]
+        
+        # Then try tokens.json
+        file_tokens = []
+        try:
+            with open("tokens.json", "r") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    file_tokens = [t for t in data if t and "TOKEN" not in t]
+        except:
+            pass
+        
+        # Combine and deduplicate
+        all_tokens = env_tokens + [t for t in file_tokens if t not in env_tokens]
+        TOKENS = list(dict.fromkeys(all_tokens))
+        
+        # Save to file for persistence
+        if TOKENS:
+            try:
+                with open("tokens.json", "w") as f:
+                    json.dump(TOKENS, f, indent=4)
+            except:
+                pass
+        
+        return TOKENS
+
+def save_tokens(tokens):
+    global TOKENS
+    with TOKENS_LOCK:
+        TOKENS = tokens
+        try:
+            with open("tokens.json", "w") as f:
+                json.dump(tokens, f, indent=4)
+        except:
+            pass
+
+# Load initial tokens
+load_tokens()
 
 if not TOKENS:
     logger.error("⚠ No tokens found! Set TOKENS environment variable.")
     logger.error("Format: TOKENS=token1,token2,token3")
 
-SUDO_USERS = [1442911002130907146]  # Your user ID
+SUDO_USERS = [1442911002130907146]  # ADD YOUR OWNER ID HERE
 PREFIX = "!"
 
 # --- PERSISTENCE FILES ---
-TOKENS_FILE = "tokens.json"
 PROFILES_FILE = "profiles.json"
 
 def load_json(filename, default=None):
@@ -63,9 +97,6 @@ def load_json(filename, default=None):
 def save_json(filename, data):
     with open(filename, 'w') as f:
         json.dump(data, f, indent=4)
-
-def save_tokens(tokens):
-    save_json(TOKENS_FILE, tokens)
 
 def load_profiles():
     return load_json(PROFILES_FILE, default={"original": {}, "saved": {}})
@@ -249,28 +280,27 @@ TMKCSWIPE_LINES = [
     "tmkc me tie","tmkc me tree","tmkc me keede","tmkc pe aalu","tmkc me blue light","tmkc me red light","tmkc me dino"
 ]
 
-# --- GLOBALS FOR NEW SYSTEMS ---
-swipe_loops = {}  # user_id -> {'stopped': False, 'lines': list, 'message_id': int, 'channel_id': int}
-lock_data = {}    # user_id -> True (global lock)
-clock_data = {}   # user_id -> custom_message
+# --- GLOBALS ---
+swipe_loops = {}
+lock_data = {}
+clock_data = {}
 
 original_profile = {}
 saved_profiles = {}
 current_profile_name = None
 
-# --- ORIGINAL BOT MANAGEMENT GLOBALS ---
 SELF_REACT_EMOJI = None
-lock_targets = {}          # channel_id -> user_id
-lock_messages = {}         # channel_id -> custom message
+lock_targets = {}
+lock_messages = {}
 react_targets = {}
 active_bots = {}
 locked_pfp = {}
 start_time = None
-global_react_target = None  # (user_id, emoji)
-copycat_mode = set()        # channel IDs where echo is enabled
+global_react_target = None
+copycat_mode = set()
 purge_from_ids = {}
 
-# --- REX LISTS (unchanged) ---
+# --- REX LISTS ---
 REX_LIST = [
     "चुदाई Kha 😂❤️", "उठक बैठक लगा 😏🔥", "तेरी माँ चोदू 😍😍", "ओय कमजोर 🤢🤢", 
     "लंड चूस 🥱🤍➿", "पिल्लै 🐕‍", "😱 arey 😉 ye 🤡 kaise 😋 kiya 😏 re 😁 teri 😊 maa 😍 randy 😭100% 😂",
@@ -363,9 +393,9 @@ class RexMasterBot(discord.Client):
         self.heart_index = {}
         self.bypass_mode = True
         self.pending_tasks = {}
-        self.swipe_tasks = {}  # user_id -> asyncio.Task
+        self.swipe_tasks = {}
+        self.bot_index = len(active_bots) + 1
 
-    # --- SWIPE LOOP ---
     async def run_swipe_loop(self, target_user_id, message_id, channel_id, lines, swipe_type):
         index = 0
         channel = self.get_channel(channel_id)
@@ -400,7 +430,6 @@ class RexMasterBot(discord.Client):
 
         swipe_loops.pop(target_user_id, None)
 
-    # --- ATTACK LOOP (NC / SPAM) ---
     async def run_attack(self, cid, cmd, args):
         is_nc = cmd in ["nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]
         loop_type = "nc" if is_nc else "spam"
@@ -470,7 +499,6 @@ class RexMasterBot(discord.Client):
 
         self.pending_tasks.pop(cid, None)
 
-    # --- ON MESSAGE (ALL COMMANDS) ---
     async def on_message(self, message):
         global SELF_REACT_EMOJI, global_react_target
         global swipe_loops, lock_data, clock_data, original_profile, saved_profiles, current_profile_name
@@ -488,7 +516,7 @@ class RexMasterBot(discord.Client):
             args = " ".join(parts[1:]) if len(parts) > 1 else ""
             cid = message.channel.id
 
-            # ---------- HELP MENU (FULL) ----------
+            # ---------- HELP MENU ----------
             if cmd in ["help", "menu"]:
                 menu_text = (
                     "```yaml\n"
@@ -513,12 +541,9 @@ class RexMasterBot(discord.Client):
                     "`!clock <msg>` (reply) `!stopclock` (reply)\n\n"
                     "**▸ PROFILE CLONING**\n"
                     "`!clone` (reply) `!normal` `!saveprf <name>` `!loadprf <name>` `!listsaveprf`\n\n"
-                    "**▸ TARGET MODULES**\n"
-                    "`!target` `!targetslide`\n\n"
-                    "**▸ SUDO CONTROL**\n"
-                    "`!addsudo` `!delsudo`\n\n"
+                    "**▸ REACT**\n"
+                    "`!react :emoji: @user` `!dreact` `!minereact` `!dminereact`\n\n"
                     "**▸ BOT MANAGEMENT**\n"
-                    "`!minereact` `!dminereact` `!react` `!dreact`\n"
                     "`!tts` (echo) `!dtts` `!activebots` `!leave`\n"
                     "`!gcpfp` (reply) `!dgcpfp` `!lockgcpfp` `!dlockgcpfp`\n"
                     "`!addbottoken` `!removebottoken`\n"
@@ -781,25 +806,39 @@ class RexMasterBot(discord.Client):
                 else: await message.channel.send("No icon lock active or not in server.")
                 return
 
-            # ---------- TOKEN MANAGEMENT ----------
+            # ---------- TOKEN MANAGEMENT (FIXED) ----------
             elif cmd == "addbottoken" and is_self:
-                if not args: await message.channel.send("Usage: `!addbottoken <token>`"); return
-                token = args.strip()
-                if token not in TOKENS:
-                    TOKENS.append(token)
-                    save_tokens(TOKENS)
-                    Thread(target=start_bot, args=(token,), daemon=True).start()
-                    await message.channel.send("✅ Token added and bot started.")
-                else: await message.channel.send("Token already exists.")
-                return
-            elif cmd == "removebottoken" and is_self:
-                if not args: await message.channel.send("Usage: `!removebottoken <token>`"); return
+                if not args:
+                    await message.channel.send("Usage: `!addbottoken <token>`")
+                    return
                 token = args.strip()
                 if token in TOKENS:
+                    await message.channel.send("Token already exists.")
+                    return
+                # Add token to list
+                global TOKENS
+                with TOKENS_LOCK:
+                    TOKENS.append(token)
+                    save_tokens(TOKENS)
+                # Start new bot
+                Thread(target=start_bot, args=(token,), daemon=True).start()
+                await message.channel.send("✅ Token added and bot started.")
+                return
+
+            elif cmd == "removebottoken" and is_self:
+                if not args:
+                    await message.channel.send("Usage: `!removebottoken <token>`")
+                    return
+                token = args.strip()
+                if token not in TOKENS:
+                    await message.channel.send("Token not found.")
+                    return
+                # Remove token from list
+                global TOKENS
+                with TOKENS_LOCK:
                     TOKENS.remove(token)
                     save_tokens(TOKENS)
-                    await message.channel.send("✅ Token removed (bot may still run until restart).")
-                else: await message.channel.send("Token not found.")
+                await message.channel.send("✅ Token removed (bot may still run until restart).")
                 return
 
             # ---------- PURGE ----------
@@ -907,10 +946,10 @@ class RexMasterBot(discord.Client):
                 asyncio.create_task(self.run_attack(cid, cmd, args))
                 return
 
-            # ========== NEW USER‑BASED LOCK & CLOCK (for global auto‑reply) ==========
+            # ========== NEW USER-BASED LOCK & CLOCK ==========
             elif cmd == "lockuser":
                 if not message.mentions:
-                    await message.channel.send("❌ Mention the user to lock: `!lockuser @user`")
+                    await message.channel.send("❌ Mention the user: `!lockuser @user`")
                     return
                 target = message.mentions[0]
                 lock_data[target.id] = True
@@ -922,7 +961,7 @@ class RexMasterBot(discord.Client):
 
             elif cmd == "unlockuser":
                 if not message.mentions:
-                    await message.channel.send("❌ Mention the user to unlock: `!unlockuser @user`")
+                    await message.channel.send("❌ Mention the user: `!unlockuser @user`")
                     return
                 target = message.mentions[0]
                 if target.id in lock_data:
@@ -974,7 +1013,7 @@ class RexMasterBot(discord.Client):
                     await message.channel.send(f"❌ No clock active for {target.display_name}.")
                 return
 
-            # ========== SWIPE COMMANDS (new) ==========
+            # ========== SWIPE COMMANDS ==========
             elif cmd in ["longswipe", "teriswipe", "tmkcswipe"]:
                 if not message.reference:
                     await message.channel.send("❌ You need to reply to a user's message to use this command.")
@@ -1184,21 +1223,14 @@ class RexMasterBot(discord.Client):
             else:
                 await message.channel.send(f"❌ Unknown command: `{cmd}`. Use `!help`.")
 
-        # ========== NON-COMMAND MESSAGES (AUTO-REPLY SYSTEMS) ==========
+        # ========== NON-COMMAND MESSAGES ==========
         if is_self:
             return
 
         author = message.author
         cid = message.channel.id
 
-        # --- NEW USER-BASED SYSTEMS (Priority: Clock > Lock > Swipe) ---
-        if author.id in clock_data:
-            try:
-                await message.reply(clock_data[author.id], mention_author=False)
-            except:
-                pass
-            return
-
+        # --- USER-BASED LOCK (global) ---
         if author.id in lock_data:
             try:
                 reply_text = random.choice(REX_LIST)
@@ -1207,9 +1239,15 @@ class RexMasterBot(discord.Client):
                 pass
             return
 
-        # Swipe is handled by the dedicated loop – nothing here.
+        # --- CLOCK (global) ---
+        if author.id in clock_data:
+            try:
+                await message.reply(clock_data[author.id], mention_author=False)
+            except:
+                pass
+            return
 
-        # --- OLD CHANNEL-BASED LOCK (for compatibility) ---
+        # --- CHANNEL-BASED LOCK ---
         if is_sudo:
             if cid in lock_targets and message.author.id == lock_targets[cid]:
                 reply_text = lock_messages.get(cid, random.choice(REX_LIST))
@@ -1218,14 +1256,14 @@ class RexMasterBot(discord.Client):
                 except:
                     pass
 
-        # --- GLOBAL REACT (works for any user) ---
+        # --- GLOBAL REACT ---
         if global_react_target and message.author.id == global_react_target[0]:
             try:
                 await message.add_reaction(global_react_target[1])
             except:
                 pass
 
-        # --- COPYCAT (only sudo users) ---
+        # --- COPYCAT ---
         if is_sudo:
             if cid in copycat_mode:
                 if message.reference:
@@ -1238,7 +1276,6 @@ class RexMasterBot(discord.Client):
                 else:
                     await message.channel.send(message.content)
 
-    # --- ON_CONNECT, ON_DISCONNECT, ON_READY ---
     async def on_connect(self):
         global start_time
         start_time = datetime.utcnow()
@@ -1264,38 +1301,55 @@ class RexMasterBot(discord.Client):
             try: await after.edit(icon=locked_pfp[after.id])
             except: pass
 
+# ========== BOT STARTER FUNCTION ==========
 def start_bot(token):
+    """Start a bot with the given token."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
     while True:
         try:
+            logger.info(f"🔄 Starting bot with token: {token[:10]}...")
             bot = RexMasterBot()
             bot.run(token)
+        except discord.LoginFailure as e:
+            logger.error(f"❌ Invalid token: {e}")
+            break  # Stop retrying if token is invalid
         except Exception as e:
-            logger.error(f"Bot error: {e}")
+            logger.error(f"❌ Bot error: {e}")
             time_module.sleep(5)
 
+# ========== MAIN ==========
 if __name__ == "__main__":
+    # Start Flask keep-alive
     Thread(target=run_web, daemon=True).start()
+    logger.info("🌐 Flask server started")
 
-    if not TOKENS:
-        try:
-            with open("tokens.json", "r") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    TOKENS = [t for t in data if t and "TOKEN" not in t]
-        except:
-            pass
-
+    # Load tokens (already loaded at top)
     if not TOKENS:
         logger.error("⚠ No tokens found! Set TOKENS environment variable.")
         logger.error("Format: TOKENS=token1,token2,token3")
         while True:
             time_module.sleep(1)
 
-    for t in TOKENS:
-        Thread(target=start_bot, args=(t,), daemon=True).start()
-        time_module.sleep(2)
+    logger.info(f"📋 Loaded {len(TOKENS)} token(s)")
 
+    # Start each bot with delay
+    started = 0
+    for i, token in enumerate(TOKENS):
+        try:
+            logger.info(f"🚀 Starting bot {i+1}/{len(TOKENS)}...")
+            thread = Thread(target=start_bot, args=(token,), daemon=True)
+            thread.start()
+            started += 1
+            if i < len(TOKENS) - 1:
+                logger.info(f"⏳ Waiting 5 seconds before next bot...")
+                time_module.sleep(5)
+        except Exception as e:
+            logger.error(f"❌ Failed to start bot {i+1}: {e}")
+
+    logger.info(f"✅ Successfully started {started}/{len(TOKENS)} bots")
+
+    # Keep main thread alive
     while True:
         time_module.sleep(1)
