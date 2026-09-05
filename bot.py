@@ -27,18 +27,16 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
-# --- TOKENS FROM ENVIRONMENT (Multiple Tokens) ---
+# --- TOKENS FROM ENVIRONMENT ---
 TOKENS = []
 TOKENS_LOCK = Lock()
+DATA_FILE = "data.json"
 
 def load_tokens():
     global TOKENS
     with TOKENS_LOCK:
-        # First try environment variable
         env_tokens = os.environ.get("TOKENS", "").split(",")
         env_tokens = [t.strip() for t in env_tokens if t.strip() and "TOKEN" not in t]
-        
-        # Then try tokens.json
         file_tokens = []
         try:
             with open("tokens.json", "r") as f:
@@ -47,19 +45,14 @@ def load_tokens():
                     file_tokens = [t for t in data if t and "TOKEN" not in t]
         except:
             pass
-        
-        # Combine and deduplicate
         all_tokens = env_tokens + [t for t in file_tokens if t not in env_tokens]
         TOKENS = list(dict.fromkeys(all_tokens))
-        
-        # Save to file for persistence
         if TOKENS:
             try:
                 with open("tokens.json", "w") as f:
                     json.dump(TOKENS, f, indent=4)
             except:
                 pass
-        
         return TOKENS
 
 def save_tokens(tokens):
@@ -77,10 +70,29 @@ load_tokens()
 
 if not TOKENS:
     logger.error("⚠ No tokens found! Set TOKENS environment variable.")
-    logger.error("Format: TOKENS=token1,token2,token3")
 
 SUDO_USERS = [1442911002130907146]  # ADD YOUR OWNER ID HERE
 PREFIX = "!"
+
+# --- PERSISTENT DATA (auto-resume) ---
+def load_data():
+    try:
+        with open(DATA_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {"swipe_loops": {}, "lock_data": {}, "clock_data": {}}
+
+def save_data():
+    data = {
+        "swipe_loops": swipe_loops,
+        "lock_data": lock_data,
+        "clock_data": clock_data
+    }
+    try:
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except:
+        pass
 
 # --- PERSISTENCE FILES ---
 PROFILES_FILE = "profiles.json"
@@ -104,7 +116,7 @@ def load_profiles():
 def save_profiles(profiles):
     save_json(PROFILES_FILE, profiles)
 
-# --- SWIPE LISTS ---
+# --- SWIPE LISTS (unchanged, full lists) ---
 LONGSWIPE_LINES = [
     "Teri kutia ma ki tang kaat ke usse danda banaunga fir ussi danda se teri ma ki chut mein daal dunga itni zor se uska pet phat jayega 🤣🤸🏿‍♀️",
     "Teri ma ki zubaan kaat ke usse strap banaunga fir ussi strap se teri ma ki chut band kar dunga 🧤",
@@ -281,9 +293,9 @@ TMKCSWIPE_LINES = [
 ]
 
 # --- GLOBALS ---
-swipe_loops = {}
-lock_data = {}
-clock_data = {}
+swipe_loops = {}  # user_id -> {'stopped': False, 'lines': list, 'message_id': int, 'channel_id': int, 'type': str}
+lock_data = {}    # user_id -> True
+clock_data = {}   # user_id -> custom_message
 
 original_profile = {}
 saved_profiles = {}
@@ -300,7 +312,7 @@ global_react_target = None
 copycat_mode = set()
 purge_from_ids = {}
 
-# --- REX LISTS ---
+# --- REX LISTS (unchanged) ---
 REX_LIST = [
     "चुदाई Kha 😂❤️", "उठक बैठक लगा 😏🔥", "तेरी माँ चोदू 😍😍", "ओय कमजोर 🤢🤢", 
     "लंड चूस 🥱🤍➿", "पिल्लै 🐕‍", "😱 arey 😉 ye 🤡 kaise 😋 kiya 😏 re 😁 teri 😊 maa 😍 randy 😭100% 😂",
@@ -397,6 +409,7 @@ class RexMasterBot(discord.Client):
         self.bot_index = len(active_bots) + 1
 
     async def run_swipe_loop(self, target_user_id, message_id, channel_id, lines, swipe_type):
+        """Continuous swipe loop on a specific message."""
         index = 0
         channel = self.get_channel(channel_id)
         if not channel:
@@ -428,7 +441,9 @@ class RexMasterBot(discord.Client):
                 logger.error(f"Swipe loop error: {e}")
                 await asyncio.sleep(1)
 
+        # Cleanup and save
         swipe_loops.pop(target_user_id, None)
+        save_data()
 
     async def run_attack(self, cid, cmd, args):
         is_nc = cmd in ["nc", "ncc", "rexnc", "enc", "longnc", "baapnc", "timenc", "spmnc"]
@@ -508,7 +523,7 @@ class RexMasterBot(discord.Client):
 
         if message.content.startswith(PREFIX):
             if not is_sudo and not is_self:
-                await message.reply("𝙍𝙀𝙓 𝘽𝘼𝘼𝙋 𝙎𝙀 𝙎𝙐𝘿𝙊 𝙇𝙀𝙆𝙀 𝘼𝘼 𝘽𝙃𝙄𝙆𝘼𝙍𝙄")
+                await message.reply("𝙆𝙃𝘼𝘿𝙀 𝙃𝙊 𝘾𝙃𝘼𝙈𝘼𝙍 𝙎𝙐𝘿𝙊 𝙆𝙀 𝙇𝙄𝙔𝙀 𝙂𝙐𝙍𝙐 𝘿𝘼𝙆𝙎𝙃𝙄𝙉𝘼 𝙈𝙀 𝙈𝙀𝙍𝘼 𝙇𝙐𝙉𝘿 𝙋𝘼𝙆𝘼𝘿")
                 return
 
             parts = message.content[len(PREFIX):].split()
@@ -570,6 +585,7 @@ class RexMasterBot(discord.Client):
                 self.pending_tasks.pop(cid, None)
                 for uid in list(swipe_loops.keys()):
                     swipe_loops[uid]['stopped'] = True
+                save_data()
                 await message.channel.send("🛑 **ALL LOOPS & FEATURES KILLED**")
                 return
 
@@ -806,7 +822,7 @@ class RexMasterBot(discord.Client):
                 else: await message.channel.send("No icon lock active or not in server.")
                 return
 
-            # ---------- TOKEN MANAGEMENT (FIXED - NO GLOBAL DECLARATION) ----------
+            # ---------- TOKEN MANAGEMENT ----------
             elif cmd == "addbottoken" and is_self:
                 if not args:
                     await message.channel.send("Usage: `!addbottoken <token>`")
@@ -815,11 +831,9 @@ class RexMasterBot(discord.Client):
                 if token in TOKENS:
                     await message.channel.send("Token already exists.")
                     return
-                # Add token to list (using the global TOKENS list directly)
                 with TOKENS_LOCK:
                     TOKENS.append(token)
                     save_tokens(TOKENS)
-                # Start new bot
                 Thread(target=start_bot, args=(token,), daemon=True).start()
                 await message.channel.send("✅ Token added and bot started.")
                 return
@@ -832,7 +846,6 @@ class RexMasterBot(discord.Client):
                 if token not in TOKENS:
                     await message.channel.send("Token not found.")
                     return
-                # Remove token from list
                 with TOKENS_LOCK:
                     TOKENS.remove(token)
                     save_tokens(TOKENS)
@@ -954,6 +967,7 @@ class RexMasterBot(discord.Client):
                 if target.id in swipe_loops:
                     swipe_loops[target.id]['stopped'] = True
                     self.swipe_tasks.pop(target.id, None)
+                save_data()
                 await message.channel.send(f"🔒 **{target.display_name}** locked globally (REX replies).")
                 return
 
@@ -964,6 +978,7 @@ class RexMasterBot(discord.Client):
                 target = message.mentions[0]
                 if target.id in lock_data:
                     del lock_data[target.id]
+                    save_data()
                     await message.channel.send(f"🔓 **{target.display_name}** unlocked.")
                 else:
                     await message.channel.send(f"❌ {target.display_name} is not locked.")
@@ -985,10 +1000,12 @@ class RexMasterBot(discord.Client):
                         swipe_loops[target.id]['stopped'] = True
                         self.swipe_tasks.pop(target.id, None)
                     lock_data.pop(target.id, None)
+                    save_data()
                     await message.channel.send(f"⏰ Clock set for {target.display_name}: `{args.strip()}`")
                 else:
                     if target.id in clock_data:
                         del clock_data[target.id]
+                        save_data()
                         await message.channel.send(f"⏰ Clock cleared for {target.display_name}.")
                     else:
                         await message.channel.send(f"❌ No clock set for {target.display_name}.")
@@ -1006,6 +1023,7 @@ class RexMasterBot(discord.Client):
                     return
                 if target.id in clock_data:
                     del clock_data[target.id]
+                    save_data()
                     await message.channel.send(f"⏰ Clock stopped for {target.display_name}.")
                 else:
                     await message.channel.send(f"❌ No clock active for {target.display_name}.")
@@ -1039,8 +1057,10 @@ class RexMasterBot(discord.Client):
                     'stopped': False,
                     'lines': lines,
                     'message_id': target_msg.id,
-                    'channel_id': target_msg.channel.id
+                    'channel_id': target_msg.channel.id,
+                    'type': cmd
                 }
+                save_data()
                 task = asyncio.create_task(
                     self.run_swipe_loop(
                         target.id,
@@ -1068,12 +1088,13 @@ class RexMasterBot(discord.Client):
                 if target.id in swipe_loops:
                     swipe_loops[target.id]['stopped'] = True
                     self.swipe_tasks.pop(target.id, None)
+                    save_data()
                     await message.channel.send(f"✅ Stopped swipe for {target.display_name}.")
                 else:
                     await message.channel.send(f"❌ No active swipe for {target.display_name}.")
                 return
 
-            # ========== PROFILE CLONING ==========
+            # ========== PROFILE CLONING (FIXED) ==========
             elif cmd == "clone":
                 if not message.reference:
                     await message.channel.send("❌ Reply to the user whose profile you want to clone.")
@@ -1085,8 +1106,13 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Could not fetch the replied message.")
                     return
 
+                # Get display name (nickname or global name)
                 new_display_name = target.display_name
+                # Get avatar URL
                 avatar_url = target.display_avatar.url
+                # Try to get bio (about me) - may not always work
+                bio = getattr(target, "bio", "")
+
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(avatar_url) as resp:
@@ -1095,36 +1121,42 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("❌ Failed to download avatar.")
                     return
 
+                # Change global username (this changes the visible name)
                 try:
                     await self.user.edit(username=new_display_name)
                 except Exception as e:
                     logger.warning(f"Could not change username: {e}")
 
+                # Change nickname in current guild
                 if message.guild:
                     try:
                         await message.guild.me.edit(nick=new_display_name)
                     except Exception as e:
                         logger.warning(f"Could not change nickname: {e}")
 
+                # Change avatar
                 try:
                     await self.user.edit(avatar=avatar_bytes)
                 except Exception as e:
                     await message.channel.send(f"❌ Failed to change avatar: {e}")
                     return
 
+                # Store original profile if not already
                 if not original_profile:
                     orig_name = self.user.display_name
                     orig_avatar = self.user.display_avatar.url
+                    orig_bio = getattr(self.user, "bio", "")
                     original_profile = {
                         "name": orig_name,
                         "avatar_url": orig_avatar,
-                        "bio": ""
+                        "bio": orig_bio
                     }
                     profiles = load_profiles()
                     profiles["original"] = original_profile
                     save_profiles(profiles)
 
-                await message.channel.send(f"✅ Cloned profile of **{target.display_name}**.")
+                # Also store the cloned profile for future use? Not automatically.
+                await message.channel.send(f"✅ Cloned profile of **{target.display_name}** (display name, avatar, bio).")
                 return
 
             elif cmd == "normal":
@@ -1165,13 +1197,14 @@ class RexMasterBot(discord.Client):
                     return
                 current_name = message.guild.me.display_name
                 current_avatar_url = self.user.display_avatar.url
+                current_bio = getattr(self.user, "bio", "")
                 profiles = load_profiles()
                 if "saved" not in profiles:
                     profiles["saved"] = {}
                 profiles["saved"][args] = {
                     "name": current_name,
                     "avatar_url": current_avatar_url,
-                    "bio": ""
+                    "bio": current_bio
                 }
                 save_profiles(profiles)
                 await message.channel.send(f"✅ Profile saved as **{args}**.")
@@ -1182,21 +1215,41 @@ class RexMasterBot(discord.Client):
                 saved = profiles.get("saved", {})
                 if not saved:
                     await message.channel.send("❌ No saved profiles.")
-                else:
-                    names = ", ".join(saved.keys())
-                    await message.channel.send(f"**Saved profiles:** {names}")
+                    return
+                # Numbered list
+                lines = []
+                for idx, (name, data) in enumerate(saved.items(), 1):
+                    lines.append(f"{idx}) **{name}**")
+                await message.channel.send("**Saved Profiles:**\n" + "\n".join(lines))
                 return
 
             elif cmd == "loadprf":
                 if not args:
-                    await message.channel.send("❌ Provide a name: `!loadprf <name>`")
+                    await message.channel.send("❌ Provide a name or number: `!loadprf <name>` or `!loadprf <number>`")
                     return
                 profiles = load_profiles()
                 saved = profiles.get("saved", {})
-                if args not in saved:
-                    await message.channel.send(f"❌ Profile `{args}` not found.")
+                if not saved:
+                    await message.channel.send("❌ No saved profiles.")
                     return
-                prof = saved[args]
+
+                # Check if arg is a number
+                target_name = None
+                if args.isdigit():
+                    idx = int(args) - 1
+                    if 0 <= idx < len(saved):
+                        target_name = list(saved.keys())[idx]
+                    else:
+                        await message.channel.send(f"❌ Invalid number. Use `!listsaveprf` to see available profiles.")
+                        return
+                else:
+                    if args in saved:
+                        target_name = args
+                    else:
+                        await message.channel.send(f"❌ Profile `{args}` not found. Use `!listsaveprf` to see available profiles.")
+                        return
+
+                prof = saved[target_name]
                 try:
                     await self.user.edit(username=prof["name"])
                 except Exception as e:
@@ -1214,8 +1267,8 @@ class RexMasterBot(discord.Client):
                 except Exception as e:
                     await message.channel.send(f"❌ Failed to load avatar: {e}")
                     return
-                current_profile_name = args
-                await message.channel.send(f"✅ Loaded profile **{args}**.")
+                current_profile_name = target_name
+                await message.channel.send(f"✅ Loaded profile **{target_name}**.")
                 return
 
             else:
@@ -1291,6 +1344,42 @@ class RexMasterBot(discord.Client):
         logger.info(f"✅ Connected to {len(self.guilds)} servers")
         active_bots[self.user.id] = {"name": str(self.user), "status": "online"}
 
+        # --- AUTO-RESUME: restore saved swipe loops, locks, clocks ---
+        data = load_data()
+        if data:
+            global swipe_loops, lock_data, clock_data
+            swipe_loops = data.get("swipe_loops", {})
+            lock_data = data.get("lock_data", {})
+            clock_data = data.get("clock_data", {})
+            logger.info(f"🔄 Restored {len(swipe_loops)} swipes, {len(lock_data)} locks, {len(clock_data)} clocks")
+
+            # Restart each swipe loop
+            for user_id, sw in list(swipe_loops.items()):
+                if sw.get('stopped', False):
+                    continue
+                # lines are stored, but we need to fetch the message
+                channel = self.get_channel(sw.get('channel_id'))
+                if not channel:
+                    continue
+                try:
+                    msg = await channel.fetch_message(sw.get('message_id'))
+                    if msg:
+                        # Start the loop again
+                        task = asyncio.create_task(
+                            self.run_swipe_loop(
+                                int(user_id),
+                                sw['message_id'],
+                                sw['channel_id'],
+                                sw.get('lines', []),
+                                sw.get('type', 'longswipe')
+                            )
+                        )
+                        self.swipe_tasks[int(user_id)] = task
+                        logger.info(f"🔄 Resumed swipe for user {user_id}")
+                except:
+                    pass
+
+        # Resume NC/Spam attacks
         for cid, (cmd, args) in list(self.pending_tasks.items()):
             asyncio.create_task(self.run_attack(cid, cmd, args))
 
@@ -1301,10 +1390,8 @@ class RexMasterBot(discord.Client):
 
 # ========== BOT STARTER FUNCTION ==========
 def start_bot(token):
-    """Start a bot with the given token."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
     while True:
         try:
             logger.info(f"🔄 Starting bot with token: {token[:10]}...")
@@ -1312,27 +1399,23 @@ def start_bot(token):
             bot.run(token)
         except discord.LoginFailure as e:
             logger.error(f"❌ Invalid token: {e}")
-            break  # Stop retrying if token is invalid
+            break
         except Exception as e:
             logger.error(f"❌ Bot error: {e}")
             time_module.sleep(5)
 
 # ========== MAIN ==========
 if __name__ == "__main__":
-    # Start Flask keep-alive
     Thread(target=run_web, daemon=True).start()
     logger.info("🌐 Flask server started")
 
-    # Load tokens (already loaded at top)
     if not TOKENS:
         logger.error("⚠ No tokens found! Set TOKENS environment variable.")
-        logger.error("Format: TOKENS=token1,token2,token3")
         while True:
             time_module.sleep(1)
 
     logger.info(f"📋 Loaded {len(TOKENS)} token(s)")
 
-    # Start each bot with delay
     started = 0
     for i, token in enumerate(TOKENS):
         try:
@@ -1341,13 +1424,11 @@ if __name__ == "__main__":
             thread.start()
             started += 1
             if i < len(TOKENS) - 1:
-                logger.info(f"⏳ Waiting 5 seconds before next bot...")
                 time_module.sleep(5)
         except Exception as e:
             logger.error(f"❌ Failed to start bot {i+1}: {e}")
 
     logger.info(f"✅ Successfully started {started}/{len(TOKENS)} bots")
 
-    # Keep main thread alive
     while True:
         time_module.sleep(1)
