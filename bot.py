@@ -508,7 +508,7 @@ class RexMasterBot(discord.Client):
 
         if message.content.startswith(PREFIX):
             if not is_sudo and not is_self:
-                await message.reply("𝙆𝙃𝘼𝘿𝙀 𝙃𝙊 𝘾𝙃𝘼𝙈𝘼𝙍 𝙎𝙐𝘿𝙊 𝙆𝙀 𝙇𝙄𝙔𝙀 𝙂𝙐𝙍𝙐 𝘿𝘼𝙆𝙎𝙃𝙄𝙉𝘼 𝙈𝙀 𝙈𝙀𝙍𝘼 𝙇𝙐𝙉𝘿 𝙋𝘼𝙆𝘼𝘿")
+                await message.reply("𝙍𝙀𝙓 𝘽𝘼𝘼𝙋 𝙎𝙀 𝙎𝙐𝘿𝙊 𝙇𝙀𝙆𝙀 𝘼𝘼 𝘽𝙃𝙄𝙆𝘼𝙍𝙄")
                 return
 
             parts = message.content[len(PREFIX):].split()
@@ -806,7 +806,7 @@ class RexMasterBot(discord.Client):
                 else: await message.channel.send("No icon lock active or not in server.")
                 return
 
-            # ---------- TOKEN MANAGEMENT (FIXED) ----------
+            # ---------- TOKEN MANAGEMENT (FIXED - NO GLOBAL DECLARATION) ----------
             elif cmd == "addbottoken" and is_self:
                 if not args:
                     await message.channel.send("Usage: `!addbottoken <token>`")
@@ -815,8 +815,7 @@ class RexMasterBot(discord.Client):
                 if token in TOKENS:
                     await message.channel.send("Token already exists.")
                     return
-                # Add token to list
-                global TOKENS
+                # Add token to list (using the global TOKENS list directly)
                 with TOKENS_LOCK:
                     TOKENS.append(token)
                     save_tokens(TOKENS)
@@ -834,7 +833,6 @@ class RexMasterBot(discord.Client):
                     await message.channel.send("Token not found.")
                     return
                 # Remove token from list
-                global TOKENS
                 with TOKENS_LOCK:
                     TOKENS.remove(token)
                     save_tokens(TOKENS)
